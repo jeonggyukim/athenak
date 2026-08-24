@@ -31,6 +31,10 @@ struct GOW17Settings {
   Real xO;
   /// Si abundance at Z=1
   Real xSi;
+  /// Build the Jacobian with the temperature-only rates hoisted out of the
+  /// species columns, restoring the thermal coupling as a rank-1 update.
+  /// Off by default so the two paths can be compared in one binary.
+  bool jacobian_hoist;
   /// Minimum temperature for reaction rates, also applied to energy equation
   Real temperature_min_rates;
   /// Maximum temperature for reaction rates
@@ -93,6 +97,7 @@ class GOW17Network {
         xC(settings.xC),
         xO(settings.xO),
         xSi(settings.xSi),
+        jacobian_hoist(settings.jacobian_hoist),
         temperature_min_rates(settings.temperature_min_rates),
         temperature_max_rates(settings.temperature_max_rates),
         temperature_max_heating(settings.temperature_max_heating),
@@ -171,6 +176,8 @@ class GOW17Network {
   const Real xSi;  /// Si abundance at Z=1
 
   // ----- Temperature Variables -----
+  /// Hoist the temperature-only rates out of the Jacobian's species columns
+  const bool jacobian_hoist;
   /// Minimum temperature for reaction rates, also applied to energy equation
   const Real temperature_min_rates;
   /// Maximum temperature for reaction rates. Does not apply for collisional
@@ -235,6 +242,8 @@ class GOW17Network {
     }
 
     Real inf = Kokkos::Experimental::infinity_v<Real>;
+    output.jacobian_hoist =
+        pin->GetOrAddBoolean("chemistry", "GOW17_jacobian_hoist", false);
     output.temperature_min_rates =
         pin->GetOrAddReal("chemistry", "GOW17_temperature_min_rates", 1.0);
     output.temperature_max_rates =
@@ -678,8 +687,12 @@ class GOW17Network {
    * \param y_in The current state
    * \return GhostSpecies The ghost species abundances
    */
+  // Called by every evaluate_function, and so by all 14 Jacobian evaluations.
+  // Recomputes the ghost species and the entire rate table unconditionally; the
+  // hoist described on UpdateRates_ adds a species-only mode here.
   template <class vec_type>
-  KOKKOS_FUNCTION GhostSpecies SetupNextStep(const vec_type& y_in) const {
+  KOKKOS_FUNCTION GhostSpecies SetupNextStep(
+      const vec_type& y_in, const bool species_only = false) const {
     // Verify abundances are positive, finite, and not NaN valued
     for (size_t i = 0; i < neqs; i++) {
       // Verify positivity
@@ -695,9 +708,439 @@ class GOW17Network {
     const GhostSpecies ghosts = ComputeGhostSpecies_(y_in);
 
     // Compute rates
-    UpdateRates_(y_in, ghosts);
+    UpdateRates_(y_in, ghosts, species_only);
 
     return ghosts;
+  }
+
+  /*!
+   * \brief phi(x) = (1 - exp(-x)) / x, the entire function with phi(0) = 1.
+   *
+   * \details Evaluated through expm1 so it stays accurate as x -> 0, where the
+   * quotient is 0/0, and switched to its series below the point where the
+   * subtraction loses significance.
+   */
+  static KOKKOS_INLINE_FUNCTION Real PhiOne_(const Real x) {
+    if (Kokkos::abs(x) < 1.0e-8) {
+      return 1.0 - 0.5 * x;
+    }
+    return -Kokkos::expm1(-x) / x;
+  }
+
+  /*!
+   * \brief Advance one species across a substep with C and D held frozen.
+   *
+   * \details Two forms of the same sub-problem, dy/dt = C - D y.
+   *
+   * The backward-Euler form (y^n + C h) / (1 + D h) is first order: right in
+   * both limits -- forward Euler as D h -> 0, the equilibrium C/D as
+   * D h -> infinity -- but only first-order accurate in between, which is what
+   * sets the error of the sweep as a whole.
+   *
+   * The exact form is the analytic solution of that frozen-coefficient problem,
+   *
+   *   y = C/D + (y^n - C/D) exp(-D h),
+   *
+   * following the exact-map construction of Inoue & Inutsuka 2008 (ApJ 687,
+   * 303), section 3.2.1. Writing it as y^n exp(-x) + C h phi(x) with
+   * phi(x) = (1 - exp(-x))/x avoids dividing by D when a species has no
+   * destruction channel, and evaluating phi through expm1 keeps it accurate as
+   * x -> 0, where it tends to 1 and the whole expression collapses to forward
+   * Euler. It removes the single-species truncation error entirely, leaving
+   * only the error from freezing C and D across the substep.
+   *
+   * \param y_n Species abundance at the start of the substep
+   * \param creation Creation rate C, independent of this species
+   * \param destruction Destruction coefficient D, so that the loss is D*y
+   * \param h Substep size
+   * \param exact_map Use the exponential solution rather than backward Euler
+   */
+  static KOKKOS_INLINE_FUNCTION Real BEStep_(const Real y_n, const Real creation,
+                                             const Real destruction,
+                                             const Real h,
+                                             const bool exact_map) {
+    const Real x = destruction * h;
+    if (!exact_map) {
+      return (y_n + creation * h) / (1.0 + x);
+    }
+    // phi(x) = (1 - exp(-x))/x, expanded near zero where the quotient is 0/0
+    return y_n * Kokkos::exp(-x) + creation * h * PhiOne_(x);
+  }
+
+  /*!
+   * \brief He+ backward-Euler step.
+   *
+   * \details Factored out because its position in the sweep is the one genuinely
+   * open ordering choice. Its creation is cosmic-ray ionization of neutral He
+   * and depends on no other integrated species, and it feeds the creation terms
+   * of H+, C+, H2+ and O+ -- so a source-first argument puts it at the head of
+   * the sweep. But its destruction reads CO and OHx, which are updated last, and
+   * at high density the He+ + CO channel is not negligible against electron
+   * recombination. `sweep_hep_first` selects between the two placements.
+   */
+  template <class vec_type>
+  KOKKOS_FUNCTION Real HePlusStep_(const vec_type& y, const Real* y_n,
+                                   const GhostSpecies& g, const Real h,
+                                   const bool exact_map) const {
+    const Real c = kcr_[1] * g.He;
+    const Real d = k2body_[i2body_Hep_H2] * y[IH2] +
+                   k2body_[i2body_Hep_CO] * y[ICO] +
+                   k2body_[i2body_Hep_e] * g.e +
+                   k2body_[i2body_Hep_H2_H2p] * y[IH2] +
+                   k2body_[i2body_Hep_OH] * y[IOHx] + kgr_[igr_Hep];
+    return BEStep_(y_n[IHE_plus], units_time_cgs * c, units_time_cgs * d, h,
+                   exact_map);
+  }
+
+  /*!
+   * \brief H2 backward-Euler / exact step.
+   *
+   * \details Its position in the sweep is the second open ordering choice, and
+   * a consequential one: H2 sets the destruction rate of most ions and appears
+   * in the creation term of H2+, H3+, CHx and H+, so three of the network's six
+   * mutually-creating pairs involve it -- more than any other species.
+   *
+   * Placing it last treats it as a slowly varying background, which is right
+   * once the gas is molecular. It is wrong during H2 formation: in the uniform
+   * test problem x(H2) climbs from 1e-6 to 3.6e-2 inside 0.6 Myr, four and a
+   * half orders of magnitude, making it among the fastest-changing quantities
+   * rather than the slowest. `sweep_h2_first` selects between the two.
+   */
+  template <class vec_type>
+  KOKKOS_FUNCTION Real StepH2_(const vec_type& y, const Real* y_n,
+                               const GhostSpecies& g, const Real h,
+                               const bool exact_map) const {
+    const Real u = units_time_cgs;
+      const Real c = k2body_[i2body_H3p_C] * y[IH3_plus] * g.C +
+                     k2body_[i2body_H3p_O] * y[IH3_plus] * g.O +
+                     k2body_[i2body_H3p_CO] * y[IH3_plus] * y[ICO] +
+                     k2body_[i2body_H3p_e] * y[IH3_plus] * g.e +
+                     k2body_[i2body_H2_H2] * y_n[IH2] * y_n[IH2] +
+                     k2body_[i2body_CH_H] * y[ICHx] * g.H +
+                     k2body_[i2body_H3p_O_H2] * y[IH3_plus] * g.O +
+                     k2body_[i2body_H2p_H] * y[IH2_plus] * g.H +
+                     kgr_[igr_H] * g.H;
+      const Real d = kcr_[0] + k2body_[i2body_Hep_H2] * y[IHE_plus] +
+                     k2body_[i2body_Cp_H2] * y[IC_plus] +
+                     k2body_[i2body_H2p_H2] * y[IH2_plus] +
+                     k2body_[i2body_H2_H] * g.H +
+                     2.0 * k2body_[i2body_H2_H2] * y_n[IH2] +
+                     k2body_[i2body_Hep_H2_H2p] * y[IHE_plus] +
+                     k2body_[i2body_Cp_H2_e] * y[IC_plus] +
+                     k2body_[i2body_Op_H2_OH] * y[IO_plus] +
+                     k2body_[i2body_Op_H2] * y[IO_plus] + kph_[iph_H2];
+      y[IH2] = BEStep_(y_n[IH2], u * c, u * d, h, exact_map);
+    return y[IH2];
+  }
+
+  /*!
+   * \brief One substep of the sweep with a hand-chosen species order.
+   *
+   * \details Replaces the index-order Jacobi loop with a Gauss-Seidel sweep
+   * ordered by the reaction graph, so that each species reads the updated value
+   * of the species it is created from. The order is
+   *
+   *   He+, Si+, H2+, H3+, H+, O+, C+, CHx, OHx, {CO, HCO+}, H2
+   *
+   * derived as follows. He+ is the only species whose creation term involves no
+   * other integrated species (cosmic rays on neutral He) while feeding four of
+   * them, so it heads the sweep. Si+ is isolated -- creation from cosmic rays
+   * and photons on neutral Si, destruction by electrons and grains -- and could
+   * sit anywhere. H2+ then H3+ is the one clean chain in the network
+   * (cr + H2 -> H2+, H2+ + H2 -> H3+). H+ and O+ follow because their creation
+   * reads He+ and H2+. C+ reads He+; CHx and OHx read H3+, C+, He+ and O+. H2 is
+   * the hub every species couples to but it is slow and abundant, so it is the
+   * lagged background and is updated last, when every other value is fresh.
+   *
+   * CO and HCO+ sit in each other's creation term (HCO+ + e -> CO and both
+   * cr + CO -> HCO+ and H3+ + CO -> HCO+), a two-cycle that no ordering can
+   * break. They are solved simultaneously in closed form instead. Writing
+   * A = 1 + D_CO h and B = 1 + D_HCO h, the pair reduces to a 2x2 whose
+   * determinant A B - b c h^2 is bounded below by 1 + (D_CO + D_HCO) h, because
+   * b <= D_HCO and c <= D_CO by construction -- so the solve never divides by
+   * zero and, every numerator being a sum of non-negative terms, it cannot
+   * produce a negative abundance.
+   *
+   * The couplings that remain lagged after this ordering are He+ <- CO, OHx;
+   * H3+ <- CO; H+ <- O+; C+ <- CO, OHx; and O+ <- OHx. Each is a destruction-side
+   * or minor-channel dependence rather than a dominant creation term.
+   *
+   * Ghost species are evaluated once per substep by the caller and held fixed.
+   *
+   * \param y     Current state, read and written in place. A species not yet
+   *              reached in the sweep still holds its start-of-substep value,
+   *              which is what makes this Gauss-Seidel rather than Jacobi.
+   * \param y_n   Start-of-substep state, the y^n of the backward-Euler formula
+   * \param g     Ghost species, held fixed across the substep
+   * \param h     Substep size
+   * \param hep_first  Place He+ at the head of the sweep rather than after CO
+   * \param h2_first   Update H2 at the head of the sweep rather than the tail
+   * \param exact_map  Use the exponential map rather than backward Euler for
+   *              the scalar species steps. The CO/HCO+ pair keeps its backward-
+   *              Euler 2x2, whose exact analogue is a 2x2 matrix exponential.
+   */
+  template <class vec_type>
+  KOKKOS_FUNCTION void OrderedSweepUpdate(const vec_type& y, const Real* y_n,
+                                          const GhostSpecies& g, const Real h,
+                                          const bool hep_first,
+                                          const bool exact_map,
+                                          const bool exact_block,
+                                          const bool h2_first) const {
+    const Real u = units_time_cgs;
+
+    // ----- H2, early placement: every ion then reads a fresh H2 -----
+    if (h2_first) {
+      y[IH2] = StepH2_(y, y_n, g, h, exact_map);
+    }
+
+    // ----- He+ : source-driven, feeds H+, C+, H2+, O+ -----
+    if (hep_first) {
+      y[IHE_plus] = HePlusStep_(y, y_n, g, h, exact_map);
+    }
+
+    // ----- Si+ : isolated, couples only through the electron abundance -----
+    {
+      const Real c = kcr_[6] * g.Si + kph_[iph_Si] * g.Si;
+      const Real d = k2body_[i2body_Sip_e] * g.e + kgr_[igr_Sip];
+      y[ISi_plus] = BEStep_(y_n[ISi_plus], u * c, u * d, h, exact_map);
+    }
+
+    // ----- H2+ : cr + H2, and He+ + H2 -----
+    {
+      const Real c = kcr_[0] * y[IH2] +
+                     k2body_[i2body_Hep_H2_H2p] * y[IHE_plus] * y[IH2];
+      const Real d = k2body_[i2body_H2p_H2] * y[IH2] +
+                     k2body_[i2body_H2p_H] * g.H;
+      y[IH2_plus] = BEStep_(y_n[IH2_plus], u * c, u * d, h, exact_map);
+    }
+
+    // ----- H3+ : the downstream half of the H2+ chain -----
+    {
+      const Real c = k2body_[i2body_H2p_H2] * y[IH2_plus] * y[IH2];
+      const Real d = k2body_[i2body_H3p_C] * g.C +
+                     k2body_[i2body_H3p_O] * g.O +
+                     k2body_[i2body_H3p_CO] * y[ICO] +
+                     k2body_[i2body_H3p_e] * g.e +
+                     k2body_[i2body_H3p_e_3H] * g.e +
+                     k2body_[i2body_H3p_O_H2] * g.O;
+      y[IH3_plus] = BEStep_(y_n[IH3_plus], u * c, u * d, h, exact_map);
+    }
+
+    // ----- H+ : reads fresh He+ and H2+, lags O+ -----
+    {
+      const Real c = kcr_[2] * g.H +
+                     k2body_[i2body_Hep_H2] * y[IHE_plus] * y[IH2] +
+                     k2body_[i2body_H_e] * g.H * g.e +
+                     k2body_[i2body_H2p_H] * y[IH2_plus] * g.H +
+                     k2body_[i2body_Op_H] * y[IO_plus] * g.H;
+      const Real d = k2body_[i2body_Hp_e] * g.e +
+                     k2body_[i2body_Hp_O] * g.O + kgr_[igr_Hp];
+      y[IH_plus] = BEStep_(y_n[IH_plus], u * c, u * d, h, exact_map);
+    }
+
+    // ----- O+ : reads fresh He+ and H+, lags OHx -----
+    {
+      const Real c = k2body_[i2body_Hep_OH] * y[IHE_plus] * y[IOHx] +
+                     k2body_[i2body_Hp_O] * y[IH_plus] * g.O;
+      const Real d = k2body_[i2body_Op_H] * g.H +
+                     k2body_[i2body_Op_H2_OH] * y[IH2] +
+                     k2body_[i2body_Op_H2] * y[IH2];
+      y[IO_plus] = BEStep_(y_n[IO_plus], u * c, u * d, h, exact_map);
+    }
+
+    // ----- C+ : reads fresh He+, lags CO and OHx -----
+    {
+      const Real c = kcr_[3] * g.C + kph_[iph_C] * g.C +
+                     k2body_[i2body_Hep_CO] * y[IHE_plus] * y[ICO];
+      const Real d = k2body_[i2body_Cp_H2] * y[IH2] +
+                     k2body_[i2body_Cp_OH] * y[IOHx] +
+                     k2body_[i2body_Cp_e] * g.e +
+                     k2body_[i2body_Cp_H2_e] * y[IH2] + kgr_[igr_Cp];
+      y[IC_plus] = BEStep_(y_n[IC_plus], u * c, u * d, h, exact_map);
+    }
+
+    // ----- CHx : reads fresh H3+ and C+ -----
+    {
+      const Real c = k2body_[i2body_H3p_C] * y[IH3_plus] * g.C +
+                     k2body_[i2body_Cp_H2] * y[IC_plus] * y[IH2];
+      const Real d = k2body_[i2body_CH_O] * g.O +
+                     k2body_[i2body_CH_H] * g.H + kph_[iph_CHx];
+      y[ICHx] = BEStep_(y_n[ICHx], u * c, u * d, h, exact_map);
+    }
+
+    // ----- OHx : reads fresh H3+, O+, C+ and He+ -----
+    {
+      const Real c = k2body_[i2body_H3p_O] * y[IH3_plus] * g.O +
+                     k2body_[i2body_Op_H2_OH] * y[IO_plus] * y[IH2];
+      const Real d = k2body_[i2body_Cp_OH] * y[IC_plus] +
+                     k2body_[i2body_OH_C] * g.C +
+                     k2body_[i2body_OH_O] * g.O +
+                     k2body_[i2body_Hep_OH] * y[IHE_plus] + kph_[iph_OHx];
+      y[IOHx] = BEStep_(y_n[IOHx], u * c, u * d, h, exact_map);
+    }
+
+    // ----- {CO, HCO+} : mutually creating, solved simultaneously -----
+    {
+      const Real a = u * (k2body_[i2body_CH_O] * y[ICHx] * g.O +
+                          k2body_[i2body_OH_C] * y[IOHx] * g.C);
+      const Real b = u * k2body_[i2body_HCOp_e] * g.e;
+      const Real d1 = u * (kcr_[4] + kcr_[5] +
+                           k2body_[i2body_H3p_CO] * y[IH3_plus] +
+                           k2body_[i2body_Hep_CO] * y[IHE_plus] + kph_[iph_CO]);
+      const Real f = u * k2body_[i2body_Cp_OH] * y[IC_plus] * y[IOHx];
+      const Real c = u * (kcr_[5] + k2body_[i2body_H3p_CO] * y[IH3_plus]);
+      const Real d2 = u * k2body_[i2body_HCOp_e] * g.e;
+
+      if (!exact_block) {
+        // Backward-Euler 2x2. det = A B - b c h^2 >= 1 + (d1 + d2) h, because
+        // b <= d2 and c <= d1 by construction, so it never vanishes and every
+        // numerator is a sum of non-negative terms.
+        const Real A = 1.0 + d1 * h;
+        const Real B = 1.0 + d2 * h;
+        const Real det = A * B - b * c * h * h;
+        const Real co =
+            (B * (y_n[ICO] + a * h) + b * h * (y_n[IHCO_plus] + f * h)) / det;
+        y[ICO] = co;
+        y[IHCO_plus] = (y_n[IHCO_plus] + f * h + c * h * co) / B;
+      } else {
+        // Exact map for the pair: dy/dt = s - M y with
+        //   M = [[d1, -b], [-c, d2]],  s = (a, f),
+        // solved as y(h) = exp(-M h) y_n + h phi1(-M h) s. For a 2x2 any matrix
+        // function is alpha I + beta M, with alpha and beta the divided
+        // differences of the scalar function over the two eigenvalues. The
+        // discriminant below cannot go negative because b and c are both
+        // non-negative rates, so the eigenvalues are always real and no complex
+        // arithmetic is needed.
+        //
+        // Note b == d2 identically here: HCO+ + e -> CO is HCO+'s only sink, so
+        // every HCO+ destroyed becomes a CO. det M = d2 (d1 - c) is therefore
+        // the rate at which carbon leaks out of the pair, and it reaches zero
+        // when the pair is closed. The equilibrium M^-1 s diverges there, which
+        // is exactly why the phi1 form is used instead.
+        const Real half_sum = 0.5 * (d1 + d2);
+        const Real half_diff = 0.5 * (d1 - d2);
+        const Real disc = Kokkos::sqrt(half_diff * half_diff + b * c);
+        const Real lam_p = half_sum + disc;
+        const Real lam_m = half_sum - disc;
+
+        const Real e_p = Kokkos::exp(-lam_p * h);
+        const Real e_m = Kokkos::exp(-lam_m * h);
+        const Real phi_p = PhiOne_(lam_p * h);
+        const Real phi_m = PhiOne_(lam_m * h);
+
+        // Divided differences, replaced by the derivative when the eigenvalues
+        // collide and the quotient becomes 0/0.
+        const Real gap = lam_p - lam_m;  // = 2 disc, non-negative
+        Real beta, beta_phi;
+        if (gap > 1.0e-12 * (1.0 + half_sum)) {
+          beta = (e_p - e_m) / gap;
+          beta_phi = (phi_p - phi_m) / gap;
+        } else {
+          // d/dlam exp(-lam h) = -h exp(-lam h); d/dlam phi(lam h) from the
+          // series, phi(x) = 1 - x/2 + x^2/6 - ...
+          beta = -h * e_m;
+          beta_phi = h * (-0.5 + lam_m * h / 3.0);
+        }
+        const Real alpha = e_m - beta * lam_m;
+        const Real alpha_phi = phi_m - beta_phi * lam_m;
+
+        // (alpha I + beta M) y_n
+        const Real co_n = y_n[ICO];
+        const Real hco_n = y_n[IHCO_plus];
+        const Real hom_co = alpha * co_n + beta * (d1 * co_n - b * hco_n);
+        const Real hom_hco = alpha * hco_n + beta * (-c * co_n + d2 * hco_n);
+        // h (alpha_phi I + beta_phi M) s
+        const Real src_co = h * (alpha_phi * a + beta_phi * (d1 * a - b * f));
+        const Real src_hco = h * (alpha_phi * f + beta_phi * (-c * a + d2 * f));
+
+        y[ICO] = Kokkos::fmax(hom_co + src_co, 0.0);
+        y[IHCO_plus] = Kokkos::fmax(hom_hco + src_hco, 0.0);
+      }
+    }
+
+    // ----- He+, late placement: reads fresh CO and OHx instead -----
+    if (!hep_first) {
+      y[IHE_plus] = HePlusStep_(y, y_n, g, h, exact_map);
+    }
+
+    // ----- H2 -----
+    if (!h2_first) {
+      y[IH2] = StepH2_(y, y_n, g, h, exact_map);
+    }
+  }
+
+  /*!
+   * \brief Rescale each element back onto its conservation law.
+   *
+   * \details The semi-implicit sweep updates every species independently, so
+   * nothing enforces the element budgets that ComputeGhostSpecies_ reads back
+   * out. Left alone an overshoot is absorbed silently by the fmax(..., 0.0)
+   * clamps there, and the element quietly stops being conserved. Any group
+   * that exceeds its total is scaled uniformly back onto it.
+   *
+   * The groups share members -- HCO+ carries C, O and H at once -- so the
+   * passes are not independent. They run in order of increasing overlap, with
+   * hydrogen last, which leaves hydrogen exactly on its budget and the others
+   * at or below theirs.
+   *
+   * Not needed by the implicit solvers, whose Newton iterate keeps the
+   * conservation laws satisfied to the tolerance of the solve.
+   *
+   * \param y_in The state to renormalize, modified in place
+   */
+  template <class vec_type>
+  KOKKOS_FUNCTION void RenormalizeElements(const vec_type& y_in) const {
+    // Non-negativity first: a negative member would mask an overshoot.
+    for (size_t i = 0; i < neqs - 1; i++) {
+      y_in(i) = Kokkos::fmax(y_in(i), 0.0);
+    }
+
+    // Single-species budgets
+    y_in[ISi_plus] = Kokkos::fmin(y_in[ISi_plus], xSi);
+    y_in[IHE_plus] = Kokkos::fmin(y_in[IHE_plus], xHe);
+
+    // Carbon: HCO+ + CHx + CO + C+ <= xC
+    {
+      const Real total =
+          y_in[IHCO_plus] + y_in[ICHx] + y_in[ICO] + y_in[IC_plus];
+      if (total > xC) {
+        const Real scale = xC / total;
+        y_in[IHCO_plus] *= scale;
+        y_in[ICHx] *= scale;
+        y_in[ICO] *= scale;
+        y_in[IC_plus] *= scale;
+      }
+    }
+
+    // Oxygen: HCO+ + OHx + CO + O+ <= xO
+    {
+      const Real total =
+          y_in[IHCO_plus] + y_in[IOHx] + y_in[ICO] + y_in[IO_plus];
+      if (total > xO) {
+        const Real scale = xO / total;
+        y_in[IHCO_plus] *= scale;
+        y_in[IOHx] *= scale;
+        y_in[ICO] *= scale;
+        y_in[IO_plus] *= scale;
+      }
+    }
+
+    // Hydrogen: OHx + CHx + HCO+ + 3 H3+ + 2 H2+ + H+ + 2 H2 <= 1
+    {
+      const Real total = y_in[IOHx] + y_in[ICHx] + y_in[IHCO_plus] +
+                         3.0 * y_in[IH3_plus] + 2.0 * y_in[IH2_plus] +
+                         y_in[IH_plus] + 2.0 * y_in[IH2];
+      if (total > 1.0) {
+        const Real scale = 1.0 / total;
+        y_in[IOHx] *= scale;
+        y_in[ICHx] *= scale;
+        y_in[IHCO_plus] *= scale;
+        y_in[IH3_plus] *= scale;
+        y_in[IH2_plus] *= scale;
+        y_in[IH_plus] *= scale;
+        y_in[IH2] *= scale;
+      }
+    }
   }
 
   /*!
@@ -705,10 +1148,10 @@ class GOW17Network {
    */
   template <class vec_type1, class vec_type2>
   KOKKOS_FUNCTION void evaluate_function(const Real /*t*/, const Real /*dt*/,
-                                         const vec_type1& y_in,
-                                         vec_type2& f) const {
+                                         const vec_type1& y_in, vec_type2& f,
+                                         const bool species_only = false) const {
     // ----- Setup for the next step -----
-    const auto ghosts = SetupNextStep(y_in);
+    const auto ghosts = SetupNextStep(y_in, species_only);
 
     // ----- Internal energy equation -----
     f(IIE) = Edot(y_in, ghosts);
@@ -734,7 +1177,100 @@ class GOW17Network {
   KOKKOS_FUNCTION void evaluate_jacobian(const Real t, const Real dt,
                                          const vec_type& y_in,
                                          const mat_type& jac) const {
-    chemistry::numerical_jacobian(*this, t, dt, y_in, jac);
+    if (!jacobian_hoist) {
+      chemistry::numerical_jacobian(*this, t, dt, y_in, jac);
+      return;
+    }
+
+    // Hoisted Jacobian. The generic version calls evaluate_function 1 + neqs
+    // times, and each call re-evaluates the ~45 temperature-only transcendentals
+    // in UpdateRates_. Here the rate table is built once, the twelve species
+    // columns reuse it, and the thermal coupling they would otherwise lose is
+    // added back analytically. Two full rate evaluations instead of fourteen.
+    // Derivation: ~/ai-notes/docs-claude/athenak-chemistry/
+    //             gow17-jacobian-hoist-design.md
+    RegisterArray<Real, neqs> f0, fp;
+
+    const Real perturbation_factor =
+        Kokkos::sqrt(Kokkos::ArithTraits<Real>::epsilon());
+
+    // Base state, full evaluation. This is what populates the temperature cache
+    // that every species column below then reuses.
+    evaluate_function(t, dt, y_in, f0);
+    // Capture the base-state cache now: the internal-energy column below runs
+    // a full evaluation and overwrites cached_T_ / cached_N_ with the perturbed
+    // state's values.
+    const Real N_base = cached_N_;
+    const Real dTdx_scale = cached_dTdx_scale_;
+
+    // ----- species columns, temperature frozen -----
+    for (int j = 0; j < neqs - 1; ++j) {
+      const Real perturbation =
+          perturbation_factor * Kokkos::fmax(Kokkos::abs(y_in(j)), Real(1.0));
+      const Real y_unperturbed = y_in(j);
+      y_in(j) += perturbation;
+
+      evaluate_function(t, dt, y_in, fp, /*species_only=*/true);
+
+      const Real inverse_diff = Real(1.0) / perturbation;
+      for (int k = 0; k < neqs; ++k) {
+        jac(k, j) = (fp(k) - f0(k)) * inverse_diff;
+      }
+      y_in(j) = y_unperturbed;
+    }
+
+    // ----- internal energy column, full evaluation -----
+    // Done last so it does not disturb the cache the species columns needed.
+    {
+      const int j = IIE;
+      const Real perturbation =
+          perturbation_factor * Kokkos::fmax(Kokkos::abs(y_in(j)), Real(1.0));
+      const Real y_unperturbed = y_in(j);
+      y_in(j) += perturbation;
+
+      evaluate_function(t, dt, y_in, fp);
+
+      const Real inverse_diff = Real(1.0) / perturbation;
+      for (int k = 0; k < neqs; ++k) {
+        jac(k, j) = (fp(k) - f0(k)) * inverse_diff;
+      }
+      y_in(j) = y_unperturbed;
+    }
+
+    // ----- restore the thermal coupling the frozen columns dropped -----
+    // T = E_ergs / Cv with E_ergs = y(IIE) * units / n_H, so
+    //   dT/dy(IIE) = (units / n_H) / Cv,
+    // and df/dT follows from the energy column already computed above. Taking
+    // df/dT this way rather than analytically means any temperature clamping is
+    // inherited automatically: if T is pinned, that column is flat and the
+    // correction is correctly zero.
+    if (dTdx_scale != Real(0.0)) {
+      // Cv = k_B N / (gamma - 1) and E_ergs = y(IIE) * units / n_H, so
+      // dT/dy(IIE) = (units / n_H) (gamma - 1) / (k_B N).
+      const Real dTdE = (units_energy_density_cgs / n_H) *
+                        (gamma - Real(1.0)) /
+                        (units::Units::k_boltzmann_cgs *
+                         Kokkos::fmax(N_base, Real(1.0e-300)));
+      if (dTdE > Real(0.0)) {
+        for (int j = 0; j < neqs - 1; ++j) {
+          // dT/dx(H2) = +T/N; dT/dx = -T/N for each cation, since ghosts.e is
+          // their plain sum; the neutrals OHx, CHx and CO leave T alone.
+          Real dTdx = Real(0.0);
+          if (j == IH2) {
+            dTdx = dTdx_scale;
+          } else if (j == IHE_plus || j == IC_plus || j == IHCO_plus ||
+                     j == IH_plus || j == IH3_plus || j == IH2_plus ||
+                     j == IO_plus || j == ISi_plus) {
+            dTdx = -dTdx_scale;
+          }
+          if (dTdx == Real(0.0)) continue;
+          const Real factor = dTdx / dTdE;
+          for (int k = 0; k < neqs; ++k) {
+            jac(k, j) += jac(k, IIE) * factor;
+          }
+        }
+      }
+    }
   }
 
  private:
@@ -856,6 +1392,38 @@ class GOW17Network {
   static constexpr int n_2body_ = 31;
   /// rates for 2 body reactions in s^-1 cm^3
   mutable RegisterArray<Real, n_2body_> k2body_;
+
+  // ----- Cached temperature-only rate factors -----
+  // Filled by the temperature phase of UpdateRates_ and reused by the species
+  // phase. This is what lets the Jacobian's species columns skip the 45-odd
+  // transcendental evaluations that depend on the state only through T. Only
+  // the handful of quantities that a species factor later multiplies into need
+  // caching, so this costs ~20 scalars rather than a copy of every rate array.
+  // See ~/ai-notes/docs-claude/athenak-chemistry/gow17-jacobian-hoist-design.md
+  /// Temperature the cache was built at, and its square root
+  mutable Real cached_T_ = -1.0;
+  mutable Real cached_Tcoll_ = -1.0;
+  mutable Real cached_sqrtT_ = 0.0;
+  /// Pure-T values of the four 2-body rates that the H2O+ branching scales
+  mutable Real k2b_T_H2Oplus_[4] = {0.0, 0.0, 0.0, 0.0};
+  /// Collisional dissociation: log10 of the low/high density limits, and
+  /// whether the collisional branch is active at this temperature
+  mutable Real cached_log10_k9l_ = 0.0, cached_log10_k9h_ = 0.0;
+  mutable Real cached_log10_k10l_ = 0.0, cached_log10_k10h_ = 0.0;
+  mutable Real cached_ncrH_ = 0.0, cached_ncrH2_ = 0.0;
+  mutable bool cached_coll_active_ = false;
+  /// Grain photoelectric prefactor, 1.7 * G_PE * sqrt(T) / n_H
+  mutable Real cached_psi_gr_fac_ = 0.0;
+  /// Heat capacity at the cached T, and N = Cv (gamma-1) / k_B, the quantity
+  /// whose derivatives give dT/dx_j for the Jacobian's thermal correction
+  mutable Real cached_N_ = 0.0;
+  /// Zero when T does not respond to the species: isothermal, or x(H2) sitting
+  /// on one of CvCold's clamps
+  mutable Real cached_dTdx_scale_ = 0.0;
+  /// Grain recombination: the two temperature-dependent sub-expressions of the
+  /// H+, C+, He+ and Si+ fits, which otherwise cost 8 pow and 4 log per column
+  mutable Real cached_gr_Tfac_[4] = {0.0, 0.0, 0.0, 0.0};
+  mutable Real cached_gr_Texp_[4] = {0.0, 0.0, 0.0, 0.0};
   /// enum for indexing into k2body_
   enum : size_t {
     i2body_H3p_C,       // index for H3+ + *C -> CH + H2 reaction
@@ -932,23 +1500,45 @@ class GOW17Network {
    * \param y_in The current state to compute the rates from
    * \param ghosts The ghost species abundances
    */
+  // PERFORMANCE / SPLIT POINT: 248 of the 260 lines below depend on the state
+  // only through the scalar T, and hold all 58 transcendental calls (28 pow, 15
+  // exp, 6 log10, 5 log, 4 sqrt). Only 12 lines touch y_in or ghosts: the T
+  // computation, the cosmic-ray scalings by x(H2) and ghosts.H, h2oplus_ratio,
+  // the ncr density blend, and the grain parameter psi. Splitting here so the
+  // Jacobian's species columns reuse cached k(T) is the single largest available
+  // saving. Note the `*=` accumulation into k2body_ -- a correct split needs the
+  // pure-T coefficients kept in their own array rather than skipping lines in
+  // place. See
+  // ~/ai-notes/docs-claude/athenak-chemistry/gow17-jacobian-hoist-design.md
   template <class vec_type>
   KOKKOS_FUNCTION void UpdateRates_(const vec_type& y_in,
-                                    const GhostSpecies& ghosts) const {
+                                    const GhostSpecies& ghosts,
+                                    const bool species_only = false) const {
+    // Species phase: T and every coefficient that depends only on T are reused
+    // from the last full call. Valid only when the caller knows T is unchanged.
+    Real T, T_collisional;
+    if (species_only) {
+      T = cached_T_;
+      T_collisional = cached_Tcoll_;
+    } else {
     // energy per hydrogen atom
     const Real E_ergs = y_in(IIE) * units_energy_density_cgs / n_H;
 
-    Real T;
     // constant or evolve temperature
     if (isothermal) {
       // isohermal EOS
       T = isothermal_temperature_;
     } else {
+      // This line is why hoisting k(T) is not trivial: T depends on x(H2) and,
+      // through ghosts.e, on all eight cations. A species perturbation in 10 of
+      // the 13 Jacobian columns therefore moves T and every rate coefficient
+      // with it. Cv is analytic though, so the coupling can be restored as a
+      // rank-1 update -- see the design note above.
       T = E_ergs / Thermo::CvCold(y_in[IH2], xHe, ghosts.e, gamma);
     }
 
     // cap T above some minimum temperature
-    Real T_collisional = T;
+    T_collisional = T;
     if (T < temperature_min_rates) {
       T = temperature_min_rates;
       T_collisional = T;
@@ -957,16 +1547,32 @@ class GOW17Network {
       // and dissociation rates T_collisional
       T = temperature_max_rates;
     }
+    cached_T_ = T;
+    cached_Tcoll_ = T_collisional;
+    cached_sqrtT_ = Kokkos::sqrt(T);
+    // N = 1 - x(H2) + x(He) + x(e), so that Cv = k_B N / (gamma - 1) and
+    // T = E / Cv. dT/dx(H2) = +T/N and dT/dx(cation) = -T/N; both vanish when
+    // the EOS is isothermal or x(H2) is against a CvCold clamp.
+    {
+      const Real xH2c = Kokkos::fmin(Kokkos::fmax(y_in[IH2], 0.0), 0.5);
+      cached_N_ = 1.0 - xH2c + xHe + Kokkos::fmax(ghosts.e, 0.0);
+      const bool clamped = (y_in[IH2] <= 0.0) || (y_in[IH2] >= 0.5);
+      cached_dTdx_scale_ =
+          (isothermal || clamped || cached_N_ <= 0.0) ? 0.0 : T / cached_N_;
+    }
+    }  // end of temperature determination
 
-    const Real logT = Kokkos::log10(T);
-    const Real logT4coll = Kokkos::log10(T_collisional / 1.0e4);
-    const Real lnTecoll = Kokkos::log(T_collisional * 8.6173e-5);
+    Real logT = 0.0, logT4coll = 0.0, lnTecoll = 0.0, kida_fac = 0.0;
+    if (!species_only) {
+      logT = Kokkos::log10(T);
+      logT4coll = Kokkos::log10(T_collisional / 1.0e4);
+      lnTecoll = Kokkos::log(T_collisional * 8.6173e-5);
+      kida_fac = (0.62 + 45.41 / cached_sqrtT_) * n_H;
+    }
 
     Real ncr, n2ncr;
     Real psi;        // H+ grain recombination parameter
     Real kcr_H_fac;  // ratio of total rate to primary rate
-    Real psi_gr_fac_;
-    const Real kida_fac = (0.62 + 45.41 / Kokkos::sqrt(T)) * n_H;
     Real t1_CHx, t2_CHx;
 
     // cosmic ray reactions
@@ -988,7 +1594,27 @@ class GOW17Network {
     kcr_[3] *= (2 * y_in[IH2] + 3.85 / kcr_base_[3]);
     kcr_[4] *= 2 * y_in[IH2];
     kcr_[6] *= 2 * y_in[IH2];
-    // 2 body reactions
+    // small number
+    constexpr Real small_real = 1e-50;
+
+    //--- H2O+ + e branching--
+    // (1) H3+ + *O -> OH + H2
+    // (24) H3+ + *O + *e -> H2 + *O + *H
+    // Species-dependent, so it is computed in both phases. sqrt(T) comes from
+    // the cache rather than being recomputed.
+    Real h2oplus_ratio;
+    if (ghosts.e < small_real) {
+      h2oplus_ratio = 1.0e10;
+    } else {
+      h2oplus_ratio = 6e-10 * y_in[IH2] / (5.3e-6 / cached_sqrtT_ * ghosts.e);
+    }
+    const Real fac_H2Oplus_H2 = h2oplus_ratio / (h2oplus_ratio + 1.);
+    const Real fac_H2Oplus_e = 1. / (h2oplus_ratio + 1.);
+
+    // 2 body reactions. Everything in this block depends on the state only
+    // through T, so the species phase skips it and reuses the coefficients
+    // already sitting in k2body_.
+    if (!species_only) {
     constexpr Real k2Texp[n_2body_] = {
         0.0,  -0.190, 0.0,    0.0, 0.0, -1.3, 0.0, 0.0,   -0.339, -0.5, -0.52,
         0.0,  -0.64,  0.042,  0.0, 0.0, 0.0,  0.0, -0.52, 0.0,    0.26, 0.0,
@@ -1038,21 +1664,6 @@ class GOW17Network {
     // (14) H+ + *e -> *H              --(12) Case B
     k2body_[14] *= Kokkos::pow(315614.0 / T, 1.5) *
                    Kokkos::pow(1.0 + Kokkos::pow(115188.0 / T, 0.407), -2.242);
-    //--- H2O+ + e branching--
-    // (1) H3+ + *O -> OH + H2
-    // (24) H3+ + *O + *e -> H2 + *O + *H
-    Real h2oplus_ratio, fac_H2Oplus_H2, fac_H2Oplus_e;
-    // small number
-    constexpr Real small_real = 1e-50;
-    if (ghosts.e < small_real) {
-      h2oplus_ratio = 1.0e10;
-    } else {
-      h2oplus_ratio = 6e-10 * y_in[IH2] / (5.3e-6 / Kokkos::sqrt(T) * ghosts.e);
-    }
-    fac_H2Oplus_H2 = h2oplus_ratio / (h2oplus_ratio + 1.);
-    fac_H2Oplus_e = 1. / (h2oplus_ratio + 1.);
-    k2body_[1] *= fac_H2Oplus_H2;
-    k2body_[24] *= fac_H2Oplus_e;
     // (25) He+ + OH -> *H + *He + *O(O+)
     k2body_[25] = 1.35e-9 * kida_fac;
     //  --- O+ reactions ---
@@ -1065,13 +1676,30 @@ class GOW17Network {
         Kokkos::exp(-227. / T);
     k2body_[28] *=
         4.99e-11 * Kokkos::pow(T, 0.405) + 7.5e-10 * Kokkos::pow(T, -0.458);
-    k2body_[29] *= fac_H2Oplus_H2;
-    k2body_[30] *= fac_H2Oplus_e;
+    // Stash the pure-T values of the four rates that the H2O+ branching scales,
+    // so the species phase can reapply the branching without recomputing them.
+    k2b_T_H2Oplus_[0] = k2body_[1];
+    k2b_T_H2Oplus_[1] = k2body_[24];
+    k2b_T_H2Oplus_[2] = k2body_[29];
+    k2b_T_H2Oplus_[3] = k2body_[30];
+    }  // end of temperature-only 2-body rates
+
+    // ----- species-dependent H2O+ branching (always runs) -----
+    k2body_[1] = k2b_T_H2Oplus_[0] * fac_H2Oplus_H2;
+    k2body_[24] = k2b_T_H2Oplus_[1] * fac_H2Oplus_e;
+    k2body_[29] = k2b_T_H2Oplus_[2] * fac_H2Oplus_H2;
+    k2body_[30] = k2b_T_H2Oplus_[3] * fac_H2Oplus_e;
 
     // Collisional dissociation, k>~1.0e-30 at T>~5e2.
-    Real k9l, k9h, k10l, k10h, ncrH, ncrH2, div_ncr;
+    // The low/high density limits and the critical densities are pure functions
+    // of T, so they are computed once and cached as logs; only the density
+    // blend, which needs ghosts.H and x(H2), runs in the species phase.
+    Real div_ncr;
     constexpr Real temp_coll = 7.0e2;
-    if (T_collisional > temp_coll && n_H > small_real) {
+    if (!species_only) {
+      Real k9l, k9h, k10l, k10h, ncrH, ncrH2;
+      cached_coll_active_ = (T_collisional > temp_coll && n_H > small_real);
+      if (cached_coll_active_) {
       // (15) H2 + *H -> 3 *H
       // (16) H2 + H2 -> H2 + 2 *H
       // --(9) Density dependent. See Glover+MacLow2007
@@ -1086,20 +1714,12 @@ class GOW17Network {
           10, (3.0 - 0.416 * logT4coll - 0.327 * logT4coll * logT4coll));
       ncrH2 = Kokkos::pow(
           10, (4.845 - 1.3 * logT4coll + 1.62 * logT4coll * logT4coll));
-      div_ncr =
-          ghosts.H / (ncrH + small_real) + y_in[IH2] / (ncrH2 + small_real);
-      if (div_ncr < small_real) {
-        ncr = 1. / small_real;
-      } else {
-        ncr = 1. / div_ncr;
-      }
-      n2ncr = n_H / ncr;
-      k2body_[15] = Kokkos::pow(10, Kokkos::log10(k9h) * n2ncr / (1. + n2ncr) +
-                                        Kokkos::log10(k9l) / (1. + n2ncr)) *
-                    n_H;
-      k2body_[16] = Kokkos::pow(10, Kokkos::log10(k10h) * n2ncr / (1. + n2ncr) +
-                                        Kokkos::log10(k10l) / (1. + n2ncr)) *
-                    n_H;
+      cached_ncrH_ = ncrH;
+      cached_ncrH2_ = ncrH2;
+      cached_log10_k9l_ = Kokkos::log10(k9l);
+      cached_log10_k9h_ = Kokkos::log10(k9h);
+      cached_log10_k10l_ = Kokkos::log10(k10l);
+      cached_log10_k10h_ = Kokkos::log10(k10h);
       // (17) *H + *e -> H+ + 2 *e       --(11) Relates to Te
       k2body_[17] *= Kokkos::exp(
           -3.271396786e1 +
@@ -1116,36 +1736,64 @@ class GOW17Network {
                 lnTecoll) *
                lnTecoll) *
               lnTecoll);  // NOLINT
+      } else {
+        k2body_[17] = 0.;
+      }
+    }  // end of temperature-only collisional rates
+
+    // ----- density blend of the collisional rates (always runs) -----
+    if (cached_coll_active_) {
+      div_ncr = ghosts.H / (cached_ncrH_ + small_real) +
+                y_in[IH2] / (cached_ncrH2_ + small_real);
+      if (div_ncr < small_real) {
+        ncr = 1. / small_real;
+      } else {
+        ncr = 1. / div_ncr;
+      }
+      n2ncr = n_H / ncr;
+      k2body_[15] =
+          Kokkos::pow(10, cached_log10_k9h_ * n2ncr / (1. + n2ncr) +
+                              cached_log10_k9l_ / (1. + n2ncr)) *
+          n_H;
+      k2body_[16] =
+          Kokkos::pow(10, cached_log10_k10h_ * n2ncr / (1. + n2ncr) +
+                              cached_log10_k10l_ / (1. + n2ncr)) *
+          n_H;
     } else {
       k2body_[15] = 0.;
       k2body_[16] = 0.;
-      k2body_[17] = 0.;
     }
 
     // photo reactions
-    constexpr Real kph_base_[n_ph] = {3.5e-10, 9.1e-10, 2.4e-10,
-                                      3.8e-10, 5.7e-11, 4.5e-9};
-    for (int i = 0; i < n_ph; i++) {
-      kph_[i] = kph_base_[i] * rad_[i];
-    }
+    if (!species_only) {
+      constexpr Real kph_base_[n_ph] = {3.5e-10, 9.1e-10, 2.4e-10,
+                                        3.8e-10, 5.7e-11, 4.5e-9};
+      for (int i = 0; i < n_ph; i++) {
+        kph_[i] = kph_base_[i] * rad_[i];
+      }
 
-    // Grain assisted recombination of H and H2
-    //   (0) *H + *H + gr -> H2 + gr
-    kgr_[0] = get_kgr_H2_(T) * n_H * zd;
+      // Grain assisted recombination of H and H2
+      //   (0) *H + *H + gr -> H2 + gr
+      kgr_[0] = get_kgr_H2_(T) * n_H * zd;
+    }
     //   (1) H+ + *e + gr -> *H + gr
     //   (2) C+ + *e + gr -> *C + gr
     //   (3) He+ + *e + gr -> *He + gr
     //   (4) Si+ + *e + gr -> *Si + gr
     //   , rate dependent on e abundance.
-    if (ghosts.e > small_real) {
-      constexpr Real cHp_[7] = {12.25,    8.074e-6, 1.378,   5.087e2,
-                                1.586e-2, 0.4723,   1.102e-5};
-      constexpr Real cCp_[7] = {45.58,    6.089e-3, 1.128,   4.331e2,
-                                4.845e-2, 0.8120,   1.333e-4};
-      constexpr Real cHep_[7] = {5.572,    3.185e-7, 1.512,   5.115e3,
-                                 3.903e-7, 0.4956,   5.494e-7};
-      constexpr Real cSip_[7] = {2.166,    5.678e-8, 1.874,   4.375e4,
-                                 1.635e-6, 0.8964,   7.538e-5};
+    //   (1) H+ + *e + gr -> *H + gr,  (2) C+, (3) He+, (4) Si+
+    // The fits share the form
+    //   1e-14 c0 / (1 + c1 psi^c2 (1 + c3 T^c4 psi^(-c5 - c6 ln T))) n_H zd
+    // in which only psi carries species dependence, so c3 T^c4 and
+    // (-c5 - c6 ln T) are cached and the species phase costs two pow per ion
+    // instead of three pow and one log.
+    constexpr Real c_gr_[4][7] = {
+        {12.25, 8.074e-6, 1.378, 5.087e2, 1.586e-2, 0.4723, 1.102e-5},
+        {45.58, 6.089e-3, 1.128, 4.331e2, 4.845e-2, 0.8120, 1.333e-4},
+        {5.572, 3.185e-7, 1.512, 5.115e3, 3.903e-7, 0.4956, 5.494e-7},
+        {2.166, 5.678e-8, 1.874, 4.375e4, 1.635e-6, 0.8964, 7.538e-5}
+    };
+    if (!species_only) {
       // set lower limit to radiation field in calculating kgr_ to avoid nan
       // values.
       Real GPE_limit = 1.0e-10;
@@ -1153,46 +1801,31 @@ class GOW17Network {
       if (GPE0 < GPE_limit) {
         GPE0 = GPE_limit;
       }
-      psi_gr_fac_ = 1.7 * GPE0 * Kokkos::sqrt(T) / n_H;
-      psi = psi_gr_fac_ / ghosts.e;
-      kgr_[1] =
-          1.0e-14 * cHp_[0] /
-          (1.0 +
-           cHp_[1] * Kokkos::pow(psi, cHp_[2]) *
-               (1.0 +
-                cHp_[3] * Kokkos::pow(T, cHp_[4]) *
-                    Kokkos::pow(psi, -cHp_[5] - cHp_[6] * Kokkos::log(T)))) *
-          n_H * zd;
-      kgr_[2] =
-          1.0e-14 * cCp_[0] /
-          (1.0 +
-           cCp_[1] * Kokkos::pow(psi, cCp_[2]) *
-               (1.0 +
-                cCp_[3] * Kokkos::pow(T, cCp_[4]) *
-                    Kokkos::pow(psi, -cCp_[5] - cCp_[6] * Kokkos::log(T)))) *
-          n_H * zd;
-      kgr_[3] =
-          1.0e-14 * cHep_[0] /
-          (1.0 +
-           cHep_[1] * Kokkos::pow(psi, cHep_[2]) *
-               (1.0 +
-                cHep_[3] * Kokkos::pow(T, cHep_[4]) *
-                    Kokkos::pow(psi, -cHep_[5] - cHep_[6] * Kokkos::log(T)))) *
-          n_H * zd;
-      kgr_[4] =
-          1.0e-14 * cSip_[0] /
-          (1.0 +
-           cSip_[1] * Kokkos::pow(psi, cSip_[2]) *
-               (1.0 +
-                cSip_[3] * Kokkos::pow(T, cSip_[4]) *
-                    Kokkos::pow(psi, -cSip_[5] - cSip_[6] * Kokkos::log(T)))) *
-          n_H * zd;
+      cached_psi_gr_fac_ = 1.7 * GPE0 * cached_sqrtT_ / n_H;
+      const Real lnT = Kokkos::log(T);
+      for (int i = 0; i < 4; i++) {
+        cached_gr_Tfac_[i] = c_gr_[i][3] * Kokkos::pow(T, c_gr_[i][4]);
+        cached_gr_Texp_[i] = -c_gr_[i][5] - c_gr_[i][6] * lnT;
+      }
+    }
+
+    if (ghosts.e > small_real) {
+      psi = cached_psi_gr_fac_ / ghosts.e;
+      for (int i = 0; i < 4; i++) {
+        kgr_[1 + i] = 1.0e-14 * c_gr_[i][0] /
+                      (1.0 + c_gr_[i][1] * Kokkos::pow(psi, c_gr_[i][2]) *
+                                 (1.0 + cached_gr_Tfac_[i] *
+                                            Kokkos::pow(psi,
+                                                        cached_gr_Texp_[i]))) *
+                      n_H * zd;
+      }
     } else {
       for (int i = 1; i < 5; i++) {
         kgr_[i] = 0.;
       }
     }
   }
+
 
   //----------------------------------------------------------------------------------------
   /*!
