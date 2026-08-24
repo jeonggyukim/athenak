@@ -65,6 +65,10 @@ class ForwardEuler {
   const Real fe_cfl;
   /// The maximum number of forward euler iterations
   unsigned int fe_n_subcycle_max;
+  /// Number of internal steps the last SolveODE() call took. Diagnostic only:
+  /// per-cell chemistry cost scales with this, so it is what makes a
+  /// chemistry-vs-hydro cost comparison interpretable.
+  int n_substeps = 0;
   /// The system of ODEs to solve
   ode_t& ode_system;
   /// The starting time for this solve
@@ -133,6 +137,7 @@ class ForwardEuler {
       // Update timing
       t_now += dt_subcycle;
       icount++;
+      n_substeps = static_cast<int>(icount);
 
       // check if convergence is established within fe_n_subcycle_max.  If not,
       // trigger a failure

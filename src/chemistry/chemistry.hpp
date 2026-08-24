@@ -60,6 +60,16 @@ class Chemistry {
   // Mean molecular weight per hydrogen atom
   Real const mu_H;
 
+  // ----- ODE substep diagnostics -----
+  // Set from <chemistry> report_substeps. Off by default: the counters cost an
+  // atomic per cell and the report costs a device-to-host copy every cycle.
+  bool const report_substeps;
+  // Total and maximum internal ODE steps over all cells in the last cycle.
+  // Real rather than int so the atomics and the copy back match the rest of the
+  // module; the counts are small enough to be exact in double.
+  DvceArray0D<Real> ode_substeps_total;
+  DvceArray0D<Real> ode_substeps_max;
+
   // ================
   // Member Functions
   // ================

@@ -41,30 +41,42 @@ void ProblemGenerator::GOW17Uniform(ParameterInput* pin, const bool restart) {
   auto& w0 = pmbp->phydro->w0;
   auto& u0 = pmbp->phydro->u0;
 
+  // Chemistry is optional here. With no <chemistry> block the module is never
+  // constructed, and this problem generator sets up the same uniform state as a
+  // pure hydro run, which is what separates chemistry cost from hydro cost in a
+  // performance comparison.
+  const bool chemistry_on = (pmbp->pchemistry != nullptr);
+
   // ----- Get the input parameters from the input file -----
   // Hydro values
   const Real n_H = pin->GetReal("problem", "n_H");
   const Real iso_cs = pin->GetReal("hydro", "iso_sound_speed");
   HydPrim1D hydro;
-  hydro.d = n_H * pmbp->punit->hydrogen_mass_cgs * pmbp->pchemistry->mu_H /
+  // Matches the <chemistry> mu_H default so a hydro-only run has the same density.
+  const Real mu_H = chemistry_on ? pmbp->pchemistry->mu_H
+                                 : pin->GetOrAddReal("problem", "mu_H", 1.4);
+  hydro.d = n_H * pmbp->punit->hydrogen_mass_cgs * mu_H /
             pmbp->punit->density_cgs();
   hydro.vx = pin->GetOrAddReal("problem", "vx_kms", 0.0);
   hydro.vy = 0.0;
   hydro.vz = 0.0;
   hydro.e = n_H * SQR(iso_cs) / (pmbp->phydro->peos->eos_data.gamma - 1.0);
 
-  // Chemistry values
-  const Real init_default = pin->GetOrAddReal("problem", "init_default", 0.0);
+  // Chemistry values. The array is always allocated (its length is a compile-time
+  // constant) but is only filled and read when the chemistry module is present.
   DualArray1D<Real> initial_chemistry("initial_chemistry",
                                       chemistry::GOW17Network::neqs - 1);
-  for (size_t i = 0; i < chemistry::GOW17Network::neqs - 1; i++) {
-    // Determine the name in the parameter file
-    const auto name = chemistry::GOW17Network::species_names[i];
-    const auto init_name = std::string("init_") + std::string(name);
+  if (chemistry_on) {
+    const Real init_default = pin->GetOrAddReal("problem", "init_default", 0.0);
+    for (size_t i = 0; i < chemistry::GOW17Network::neqs - 1; i++) {
+      // Determine the name in the parameter file
+      const auto name = chemistry::GOW17Network::species_names[i];
+      const auto init_name = std::string("init_") + std::string(name);
 
-    // Get the value and save it
-    const Real val = pin->GetOrAddReal("problem", init_name, init_default);
-    initial_chemistry.view_host()(i) = val;
+      // Get the value and save it
+      const Real val = pin->GetOrAddReal("problem", init_name, init_default);
+      initial_chemistry.view_host()(i) = val;
+    }
   }
 
   // Copy intializing data to the device
@@ -73,7 +85,8 @@ void ProblemGenerator::GOW17Uniform(ParameterInput* pin, const bool restart) {
   auto initial_chemistry_d = initial_chemistry.view_device();
 
   // Assign values
-  const int chem_start = pmbp->pchemistry->get_chemistry_scalars_first_idx();
+  const int chem_start =
+      chemistry_on ? pmbp->pchemistry->get_chemistry_scalars_first_idx() : 0;
   par_for(
       "pgen_GOW17_hydro", DevExeSpace(), 0, (pmbp->nmb_thispack - 1), ks, ke,
       js, je, is, ie, KOKKOS_LAMBDA(int m, int k, int j, int i) {
@@ -85,8 +98,10 @@ void ProblemGenerator::GOW17Uniform(ParameterInput* pin, const bool restart) {
         w0(m, IEN, k, j, i) = hydro.e;
 
         // Assign chemistry values to this cell
-        for (size_t s = 0; s < chemistry::GOW17Network::neqs - 1; s++) {
-          w0(m, chem_start + s, k, j, i) = initial_chemistry_d(s);
+        if (chemistry_on) {
+          for (size_t s = 0; s < chemistry::GOW17Network::neqs - 1; s++) {
+            w0(m, chem_start + s, k, j, i) = initial_chemistry_d(s);
+          }
         }
       });
 
