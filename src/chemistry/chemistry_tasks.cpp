@@ -7,6 +7,8 @@
 //! \brief functions that control Chemistry tasks stored in tasklists in
 //! MeshBlockPack
 
+#include <cstdlib>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <string>
@@ -82,6 +84,22 @@ void Chemistry::AssembleChemistryTasks(
                                                  id.csend);
 }
 
+namespace {
+/*!
+ * \brief Abort on an unrecognised <chemistry> ode_solver.
+ *
+ * \details Without this an unmatched selector falls through the dispatch and
+ * the chemistry solve is silently skipped, which in a timing run looks like a
+ * very fast solver rather than an absent one.
+ */
+void UnknownODESolver(const std::string &network, const std::string &solver) {
+  std::cout << "### FATAL ERROR: <chemistry> ode_solver = '" << solver
+            << "' is not a valid ODE solver for the '" << network
+            << "' network. Please check the athinput file." << std::endl;
+  std::exit(EXIT_FAILURE);
+}
+}  // namespace
+
 /*!
  * \brief Selects the proper template of Chemistry::UpdateChemistry to call and
  * passes in the proper arguments
@@ -95,12 +113,18 @@ TaskStatus Chemistry::UpdateChemistryTask(Driver* d, int stage) {
       UpdateChemistry<ode_solvers::ForwardEuler, H2Network>();
     } else if (ode_solver == "kokkos_BDF") {
       UpdateChemistry<ode_solvers::KokkosBDF, H2Network>();
+    } else {
+      UnknownODESolver(network, ode_solver);
     }
   } else if (network == "GOW17") {
     if (ode_solver == "forward_euler") {
       UpdateChemistry<ode_solvers::ForwardEuler, GOW17Network>();
     } else if (ode_solver == "kokkos_BDF") {
       UpdateChemistry<ode_solvers::KokkosBDF, GOW17Network>();
+    } else if (ode_solver == "semi_implicit_sweep") {
+      UpdateChemistry<ode_solvers::SemiImplicitSweep, GOW17Network>();
+    } else {
+      UnknownODESolver(network, ode_solver);
     }
   }
 

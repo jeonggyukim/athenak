@@ -9,6 +9,7 @@
 #include "chemistry/chemistry.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -32,6 +33,10 @@ Chemistry::Chemistry(MeshBlockPack* ppack, ParameterInput* pin)
       is_mhd_enabled(pin->DoesBlockExist("mhd")),
       nscalars_chemistry(SetupGetNumChemistryScalars(ppack, pin, -1, false)),
       mu_H(pin->GetOrAddReal("chemistry", "mu_H", 1.4)),
+      report_substeps(
+          pin->GetOrAddBoolean("chemistry", "report_substeps", false)),
+      ode_substeps_total("ode_substeps_total"),
+      ode_substeps_max("ode_substeps_max"),
       chemistry_scalars_first_idx(ComputeChemistryScalarsStartIndex()),
       my_pin(pin),
       pchem_rad(ppack, pin) {
@@ -115,6 +120,17 @@ void Chemistry::UpdateChemistry() {
   auto const policy = Kokkos::MDRangePolicy<Kokkos::Rank<4>>(
       DevExeSpace(), start_limit, end_limit);
 
+  // ----- ODE substep diagnostics -----
+  // Captured by value into the kernel, so they have to be locals rather than
+  // members. Zeroed here because the counts are per cycle, not cumulative.
+  bool const count_substeps = report_substeps;
+  auto substeps_total = ode_substeps_total;
+  auto substeps_max = ode_substeps_max;
+  if (count_substeps) {
+    Kokkos::deep_copy(substeps_total, 0.0);
+    Kokkos::deep_copy(substeps_max, 0.0);
+  }
+
   Kokkos::parallel_for(
       "Chemistry_ODE_Solve", policy,
       KOKKOS_LAMBDA(const int& mb_idx, const int& k, const int& j,
@@ -143,6 +159,14 @@ void Chemistry::UpdateChemistry() {
         // ode_solvers::KokkosBDF solver(chem_net, t_start, dt);
         ode_solver.SolveODE();
 
+        // How many internal steps that macro-step cost. One atomic pair per
+        // cell, so this stays behind the input flag.
+        if (count_substeps) {
+          Real const n = static_cast<Real>(ode_solver.n_substeps);
+          Kokkos::atomic_add(&substeps_total(), n);
+          Kokkos::atomic_max(&substeps_max(), n);
+        }
+
         // ------ Write cell values back out ------
         // Chemistry scalars
         grid_idx = species_start_idx;
@@ -154,6 +178,21 @@ void Chemistry::UpdateChemistry() {
         // Write internal energy
         w0(mb_idx, IEN, k, j, i) = chem_net.y(Network_t::IIE);
       });
+
+  if (count_substeps) {
+    Real total = 0.0, max = 0.0;
+    Kokkos::deep_copy(total, substeps_total);
+    Kokkos::deep_copy(max, substeps_max);
+    // Cell count from the same limits the kernel used, ghost zones included.
+    std::uint64_t ncells = 1;
+    for (int n = 0; n < 4; ++n) {
+      ncells *= static_cast<std::uint64_t>(end_limit[n] - start_limit[n]);
+    }
+    std::cout << "chemistry substeps: total=" << static_cast<std::uint64_t>(total)
+              << " mean=" << total / static_cast<Real>(ncells)
+              << " max=" << static_cast<std::uint64_t>(max)
+              << " cells=" << ncells << std::endl;
+  }
 }
 
 // Instantiate the different versions of UpdateChemistry
@@ -164,6 +203,10 @@ template void
 Chemistry::UpdateChemistry<ode_solvers::ForwardEuler, GOW17Network>();
 template void
 Chemistry::UpdateChemistry<ode_solvers::KokkosBDF, GOW17Network>();
+// The semi-implicit sweep needs CDRates/Edot/RenormalizeElements, which only
+// GOW17 provides, so it is not instantiated for H2.
+template void
+Chemistry::UpdateChemistry<ode_solvers::SemiImplicitSweep, GOW17Network>();
 
 /*!
  * \brief Return the name of the chemical species at scalar_idx
