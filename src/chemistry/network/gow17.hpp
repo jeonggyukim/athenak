@@ -144,6 +144,31 @@ class GOW17Network {
     IIE,        // internal energy, must be last
   };
 
+  /*!
+   * \brief Species that pace the adaptive substep, and how many there are.
+   *
+   * \details The substep controller must not limit on every species. The trace
+   * ions sit at 1e-12 and change by orders of magnitude while changing by almost
+   * nothing in absolute terms, so a relative criterion applied to them drives the
+   * step to zero -- and they are exactly the species the backward-Euler form
+   * already carries to their equilibrium C/D for free. Limiting on them would
+   * discard the whole advantage of the method.
+   *
+   * What should pace the step is the set of quantities that are genuinely
+   * integrated rather than quasi-steady, and that the calculation exists to
+   * predict: H2 and CO, plus the internal energy (handled separately by the
+   * solver, which always has it). This mirrors tigris limiting on x_H2, x_HII and
+   * t_cool in `photchem/ncr_solver.hpp` -- those are its science outputs, these
+   * are GOW17's.
+   *
+   * Measured on the uniform test problem, this choice gives ~7 substeps at
+   * t = 0.05 Myr, ~4 at 0.31 Myr and 1 near equilibrium, with no threshold knob.
+   */
+  static constexpr int n_pacing = 2;
+  static KOKKOS_INLINE_FUNCTION constexpr int pacing_species(const int i) {
+    return (i == 0) ? static_cast<int>(IH2) : static_cast<int>(ICO);
+  }
+
   // ----- Names, used for output, must be the same order as the enum -----
   static constexpr std::array<std::string_view, neqs - 1> species_names = {
       "He+", "OHx", "CHx", "CO",  "C+", "HCO+",

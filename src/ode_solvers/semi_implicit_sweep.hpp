@@ -62,8 +62,8 @@ struct SweepSettings {
   bool sweep_exact_block;
   /// Update H2 at the head of the ordered sweep rather than the tail.
   bool sweep_h2_first;
-  /// Use the tigris-style adaptive controller instead of a fixed substep count.
-  /// See ChooseStepAbsolute_ for what differs from the relative criterion.
+  /// Use the adaptive controller paced by the network's nominated species
+  /// instead of a fixed substep count. See ChooseStepPaced_.
   bool sweep_adaptive;
   /// Halve and retry a substep this many times when the energy update produces
   /// a non-physical state or moves T by more than 2*sweep_cfl.
@@ -270,7 +270,7 @@ class SemiImplicitSweep {
             dt_sub = Kokkos::min(dt / static_cast<Real>(sweep_n_substep_fixed),
                                  dt_remaining);
           } else if (sweep_adaptive) {
-            dt_sub = ChooseStepAbsolute_(rates, edot, dt_remaining);
+            dt_sub = ChooseStepPaced_(rates, edot, dt_remaining);
           } else {
             dt_sub = ChooseStep_(rates, dt_remaining);
           }
@@ -319,21 +319,31 @@ class SemiImplicitSweep {
 
  private:
   /*!
-   * \brief Substep size from absolute rates of change, following tigris.
+   * \brief Substep size paced by the network's slow, integrated species.
    *
-   * \details The relative criterion in ChooseStep_ limits on cfl*y/|f|, which is
-   * restrictive for every trace species and therefore needs sweep_stiff_threshold
-   * to exclude the stiff ones. tigris (`photchem/ncr_solver.hpp`, DoOneSubstep)
-   * instead limits on the *absolute* rate,
+   * \details tigris (`photchem/ncr_solver.hpp`, DoOneSubstep) limits the substep
+   * on a deliberately chosen handful of quantities -- x_HII, x_H2 and the net
+   * cooling time -- not on every species. That choice is the substance of the
+   * controller, and the reason its absolute form 1/|f| works there: its species
+   * are order unity, so "time to change by one" is a real timescale.
    *
-   *   t_chem,i = 1 / |C_i - D_i y_i| = 1 / |f_i|,
+   * Transplanting the absolute form to GOW17 fails, and measurably so. Its
+   * species sit at 1e-10 to 1e-4, so 1/|f| lands between 1e3 and 1e10 Myr against
+   * a 0.034 Myr macro-step: CHx alone gives 1e10 Myr. Nothing binds, the sweep
+   * silently drops to one substep, and the worst-species error sits near 100%
+   * through the first 0.4 Myr. The failure is structural rather than a matter of
+   * tuning -- early on these species move by orders of magnitude while moving by
+   * almost nothing in absolute terms, and an absolute criterion cannot see that.
    *
-   * the time for the abundance to change by unity rather than by a fraction of
-   * itself. A species sitting at 1e-10 then never constrains the step, so the
-   * stiff-exclusion threshold is unnecessary -- the criterion has the property
-   * built in. The thermal limit is likewise on the *net* rate,
-   * t_cool = 1/|Lambda - Gamma|, which stops constraining near thermal
-   * equilibrium where heating and cooling cancel.
+   * So the criterion is relative, and it is applied only to the species the
+   * network nominates through pacing_species(). Applying it to all of them would
+   * be paced by HCO+ and O+ at 1e-12, which the backward-Euler form already
+   * carries to equilibrium exactly; that is the trap sweep_stiff_threshold exists
+   * to work around in ChooseStep_, and choosing the right species removes the
+   * need for the knob rather than papering over it.
+   *
+   * The energy is always included. Its limit is on the net rate E/|Edot|, which
+   * relaxes on its own near thermal equilibrium where heating and cooling cancel.
    *
    * \param rates Creation and destruction rates at the start of the substep
    * \param edot Net internal-energy rate, code units
@@ -341,25 +351,24 @@ class SemiImplicitSweep {
    * \return Real The substep size, never larger than dt_remaining
    */
   template <class rates_type>
-  KOKKOS_FUNCTION Real ChooseStepAbsolute_(const rates_type& rates,
-                                           const Real edot,
-                                           const Real dt_remaining) const {
-    constexpr int nspecies = ode_t::neqs - 1;
+  KOKKOS_FUNCTION Real ChooseStepPaced_(const rates_type& rates, const Real edot,
+                                        const Real dt_remaining) const {
     Real dt_sub = dt_remaining;
 
-    // Thermal limit on the net heating-minus-cooling rate
     const Real energy = ode_system.y(ode_t::IIE);
     if (energy > 0.0) {
-      const Real t_cool = energy / (Kokkos::abs(edot) + small);
       // NOLINTNEXTLINE(build/include_what_you_use)
-      dt_sub = Kokkos::min(dt_sub, sweep_cfl * t_cool);
+      dt_sub = Kokkos::min(dt_sub,
+                           sweep_cfl * energy / (Kokkos::abs(edot) + small));
     }
 
-    // Chemical limit on the absolute rate of change of each species
-    for (int n = 0; n < nspecies; ++n) {
-      const Real f_n = rates.creation(n) - ode_system.y(n) * rates.destruction(n);
+    for (int p = 0; p < ode_t::n_pacing; ++p) {
+      const int n = ode_t::pacing_species(p);
+      const Real y_n = ode_system.y(n);
+      const Real f_n = rates.creation(n) - y_n * rates.destruction(n);
+      const Real scale = Kokkos::max(Kokkos::abs(y_n), sweep_yfloor);
       // NOLINTNEXTLINE(build/include_what_you_use)
-      dt_sub = Kokkos::min(dt_sub, sweep_cfl / (Kokkos::abs(f_n) + small));
+      dt_sub = Kokkos::min(dt_sub, sweep_cfl * scale / (Kokkos::abs(f_n) + small));
     }
 
     // NOLINTNEXTLINE(build/include_what_you_use)
