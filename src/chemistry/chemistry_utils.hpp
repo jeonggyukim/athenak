@@ -122,6 +122,18 @@ KOKKOS_FUNCTION void numerical_jacobian(const network_t& network, const Real t,
                                         const mat_type& jac) {
   RegisterArray<Real, network.neqs> f0, fp;
 
+  // PERFORMANCE: this builds the Jacobian with 1 + neqs evaluations of the full
+  // network. For GOW17 that is 14 calls, each running UpdateRates_ with its 58
+  // transcendentals, so roughly 810 transcendental evaluations per Jacobian --
+  // the dominant cost of the chemistry module in the measured profile.
+  //
+  // 248 of UpdateRates_'s 260 lines depend on the state only through T, so most
+  // of that work is redundant across the species columns. Hoisting it is not
+  // free, because T itself depends on x(H2) and on the electron abundance; see
+  // ~/ai-notes/docs-claude/athenak-chemistry/gow17-jacobian-hoist-design.md
+  // for the derivation and the rank-1 thermal correction that makes the hoist
+  // exact rather than approximate.
+
   // Evaluate the unperturbed f0
   network.evaluate_function(t, dt, y_in, f0);
 
@@ -129,6 +141,9 @@ KOKKOS_FUNCTION void numerical_jacobian(const network_t& network, const Real t,
   const Real perturbation_factor =
       Kokkos::sqrt(Kokkos::ArithTraits<Real>::epsilon());
 
+  // Columns 0..neqs-2 perturb a species and column neqs-1 perturbs the internal
+  // energy. The rate coefficients see a species perturbation only through T, so
+  // this loop recomputes the same k(T) values up to 13 times over.
   for (int j = 0; j < network.neqs; ++j) {
     // Add the perturbation to the jth element
     const Real perturbation =

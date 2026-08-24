@@ -56,6 +56,7 @@ time_cgs    = 3.08567758e+13          # time is 1 Myr
 mu          = 1.27                    # mean molecular weight
 
 <chemistry>
+GOW17_jacobian_hoist       = false      # hoist k(T) out of the Jacobian's species columns
 network                    = GOW17      # Chemistry network to be used
 ode_solver                 = kokkos_BDF # ODE solver to be used
 kokkos_BDF_first_step_frac = 1.0e-6     # The first step fraction, tuned for this problem

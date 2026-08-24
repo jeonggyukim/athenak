@@ -33,6 +33,10 @@ class Thermo {
    *
    * \return Real specific heat per H atom.
    */
+  // The analytic form here is what lets the GOW17 Jacobian hoist restore the
+  // thermal coupling as a rank-1 update: with N = 1 - xH2 + xHe + xe we have
+  // Cv = k_B N / (gamma - 1) and T = E / Cv, so dT/dxH2 = +T/N and dT/dxe = -T/N.
+  // Mind the clamps below -- at a clamp boundary the derivative is zero.
   KOKKOS_FUNCTION static Real CvCold(const Real xH2, const Real xHe_total,
                                      const Real xe, const Real gamma) {
     // floor abundances and 0 to avoid mathematical issues with sqrt and log
