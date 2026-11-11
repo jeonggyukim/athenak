@@ -52,6 +52,22 @@ Runtime Parameters:
 
 *Note: The Kokkos BDF solver also has a maximum internal step size that is set to the hydro timestep `dt`. As of Kokkos Kernels 4.4 this is not implemented within Kokkos Kernels and so it currently has no effect.*
 
+### Semi-Implicit
+
+The semi-implicit solver splits the hydro timestep into substeps. In each substep the internal energy takes one linearized backward Euler step, `e += h Edot / (1 - h dEdot/de)`, and then each species takes one backward Euler step with its creation rate `C` and destruction rate `D`, `y = (y_n + h C) / (1 + h D)`. The species are updated one at a time in an order set by the network (Gauss-Seidel), so each species sees the new values of those updated before it. It needs no Jacobian and no linear solve, which makes it much cheaper than BDF, but it has no error control: its accuracy is set by `semi_implicit_cfl`.
+
+Each substep is limited to `semi_implicit_cfl` times the shortest of the internal-energy timescale `e/|Edot|` and the timescales `y/|f|` of the species the network lists as step-limiting. Species that relax to equilibrium within a substep are not listed; backward Euler takes them there without overshooting.
+
+Runtime Parameters:
+
+| Option                      | Type | Default | Description                                                                                         |
+| --------------------------- | ---- | ------- | --------------------------------------------------------------------------------------------------- |
+| semi_implicit_cfl           | Real | 0.1     | fraction of the energy and step-limiting species timescales a substep may take                      |
+| semi_implicit_yfloor        | Real | 1e-12   | abundance floor used when computing the species timescales                                          |
+| semi_implicit_nsub_max      | int  | 100     | maximum number of substeps; the last one takes all the time that is left                            |
+| semi_implicit_nsub_fixed    | int  | 0       | if positive, use this many equal substeps instead of choosing them from the timescales              |
+| semi_implicit_refresh_rates | bool | false   | recompute the rate coefficients at the new temperature after the energy update                      |
+
 ## Developer Documentation
 
 To facilitate easy swapping between different ODE solvers both the solvers and ODE system classes must have a very strict APIs. The forward euler solver in [forward_euler.hpp](../../blob/master/src/ode_solvers/forward_euler.hpp) and H2 network in [H2.hpp](../../blob/master/src/chemistry/network/H2.hpp) can serve as a templates but here's a description of the APIs in more detail.
@@ -79,6 +95,18 @@ The ODE system should be contained in a class with at minimum the following memb
 - Many solvers require an `evaluate_jacobian(t, dt, y_in, jac)` method that computes the Jacobian matrix `jac` of the right-hand side with respect to `y_in`. Like `evaluate_function`, it should be templated on the array types. The `chemistry::numerical_jacobian` helper can be used to compute the Jacobian via finite differences if an analytic Jacobian is not available.
 
 Specific ODE solvers might require other methods and they are noted below.
+
+#### Semi-Implicit Solver
+
+The semi-implicit solver additionally needs, in the ODE system class:
+
+- `UpdateOrder`, a `std::integer_sequence<int, ...>` of species indices in the order they are updated. It is a compile-time list, so the update is unrolled with constant indices.
+- `StepLimitingSpecies`, the species whose relative change limits the substep, in the same form.
+- `SetupNextStep(y)`, which prepares the rate coefficients for a substep and returns the ghost species (species set by conservation, not stored), or an empty struct if there are none.
+- `CDRates(y, ghosts)`, the creation and destruction rates, used as `f(k) = creation(k) - y(k) * destruction(k)`.
+- `Edot(y, ghosts)`, the internal energy equation.
+
+Optionally, a network sets `static constexpr bool custom_species_update = true` and provides `template <int K> void UpdateSpecies(y, y_n, ghosts, h)`, which then replaces the update of every species `K` in `UpdateOrder`. A network uses it to evaluate only one species' rates per update, to write a species in a more stable form, or to update several species together (those then appear once in `UpdateOrder`). The H2 network uses it to set H from hydrogen conservation; GOW17 uses it to write the ions created from neutral reservoirs implicitly and to solve CO and HCO+ together.
 
 ### Code Example
 
