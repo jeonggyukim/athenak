@@ -712,7 +712,17 @@ class GOW17Network {
    * y_K = (y_K^n + h C) / (1 + h D), with C and D from the current state.
    *
    * \details Written per species so that each step evaluates only its own
-   * terms.
+   * terms. He+, Si+, H+, O+ and C+ are created by ionizing a neutral X0 that is
+   * not stored but is the remainder of its element, x_X0 = x_tot - x_X+ - ....
+   * With a the total ionization rate of X0 and C' the other creation terms, the
+   * ion equation
+   *   dx_X+/dt = a x_X0 + C' - D x_X+
+   * is written as
+   *   dx_X+/dt = a (x_X0 + x_X+) + C' - (a + D) x_X+,
+   * which has the same right-hand side. For C' = D = 0, the backward Euler step
+   * of this form gives x_X0(new) = x_X0 / (1 + h a), a backward Euler step for
+   * the neutral. The first form gives x_X0(new) = x_X0 (1 - h a), a forward
+   * Euler step that goes negative for h > 1/a.
    *
    * \param y The state, updated in place
    * \param y_n The state at the start of the substep
@@ -725,13 +735,15 @@ class GOW17Network {
                                      const Real h) const {
     Real c, d;
     if constexpr (K == IHE_plus) {
-      c = kcr_[1] * g.He;
+      const Real a = kcr_[1];
+      c = a * (g.He + y[IHE_plus]);
       d = k2body_[i2body_Hep_H2] * y[IH2] + k2body_[i2body_Hep_CO] * y[ICO] +
           k2body_[i2body_Hep_e] * g.e + k2body_[i2body_Hep_H2_H2p] * y[IH2] +
-          k2body_[i2body_Hep_OH] * y[IOHx] + kgr_[igr_Hep];
+          k2body_[i2body_Hep_OH] * y[IOHx] + kgr_[igr_Hep] + a;
     } else if constexpr (K == ISi_plus) {
-      c = (kcr_[6] + kph_[iph_Si]) * g.Si;
-      d = k2body_[i2body_Sip_e] * g.e + kgr_[igr_Sip];
+      const Real a = kcr_[6] + kph_[iph_Si];
+      c = a * (g.Si + y[ISi_plus]);
+      d = k2body_[i2body_Sip_e] * g.e + kgr_[igr_Sip] + a;
     } else if constexpr (K == IH2_plus) {
       c = kcr_[0] * y[IH2] + k2body_[i2body_Hep_H2_H2p] * y[IHE_plus] * y[IH2];
       d = k2body_[i2body_H2p_H2] * y[IH2] + k2body_[i2body_H2p_H] * g.H;
@@ -741,23 +753,26 @@ class GOW17Network {
           k2body_[i2body_H3p_CO] * y[ICO] + k2body_[i2body_H3p_e] * g.e +
           k2body_[i2body_H3p_e_3H] * g.e + k2body_[i2body_H3p_O_H2] * g.O;
     } else if constexpr (K == IH_plus) {
-      c = (kcr_[2] + k2body_[i2body_H_e] * g.e) * g.H +
+      const Real a = kcr_[2] + k2body_[i2body_H_e] * g.e;
+      c = a * (g.H + y[IH_plus]) +
           k2body_[i2body_Hep_H2] * y[IHE_plus] * y[IH2] +
           k2body_[i2body_H2p_H] * y[IH2_plus] * g.H +
           k2body_[i2body_Op_H] * y[IO_plus] * g.H;
       d = k2body_[i2body_Hp_e] * g.e + k2body_[i2body_Hp_O] * g.O +
-          kgr_[igr_Hp];
+          kgr_[igr_Hp] + a;
     } else if constexpr (K == IO_plus) {
+      const Real a = k2body_[i2body_Hp_O] * y[IH_plus];
       c = k2body_[i2body_Hep_OH] * y[IHE_plus] * y[IOHx] +
-          k2body_[i2body_Hp_O] * y[IH_plus] * g.O;
+          a * (g.O + y[IO_plus]);
       d = k2body_[i2body_Op_H] * g.H + k2body_[i2body_Op_H2_OH] * y[IH2] +
-          k2body_[i2body_Op_H2] * y[IH2];
+          k2body_[i2body_Op_H2] * y[IH2] + a;
     } else if constexpr (K == IC_plus) {
-      c = (kcr_[3] + kph_[iph_C]) * g.C +
+      const Real a = kcr_[3] + kph_[iph_C];
+      c = a * (g.C + y[IC_plus]) +
           k2body_[i2body_Hep_CO] * y[IHE_plus] * y[ICO];
       d = k2body_[i2body_Cp_H2] * y[IH2] + k2body_[i2body_Cp_OH] * y[IOHx] +
           k2body_[i2body_Cp_e] * g.e + k2body_[i2body_Cp_H2_e] * y[IH2] +
-          kgr_[igr_Cp];
+          kgr_[igr_Cp] + a;
     } else if constexpr (K == ICHx) {
       c = k2body_[i2body_H3p_C] * y[IH3_plus] * g.C +
           k2body_[i2body_Cp_H2] * y[IC_plus] * y[IH2];
