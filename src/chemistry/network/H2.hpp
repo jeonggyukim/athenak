@@ -8,6 +8,8 @@
 //! \file H2.hpp
 //  \brief The implementation for the struct for the H2 chemistry network
 
+#include <utility>
+
 #include <Kokkos_ArithTraits.hpp>
 
 #include "athena.hpp"
@@ -35,6 +37,8 @@ struct H2Settings {
  *   - `y` and `f` RegisterArray variables to hold the current state and the
  *     result of evaluating the equations respectively.
  *   - An `evaluate_function` method that computes `f` from `y`
+ * For the semi-implicit solver they also need an `UpdateOrder`, and
+ * `SetupNextStep`, `CDRates` and `Edot` methods; see semi_implicit.hpp.
  */
 class H2Network {
  public:
@@ -82,6 +86,17 @@ class H2Network {
   // ----- Names, used for output, must be the same order as the enum -----
   static constexpr std::array<std::string_view, neqs - 1> species_names = {"H2",
                                                                            "H"};
+
+  /// Species order for the semi-implicit solver. Only H2 is listed;
+  /// UpdateSpecies<IH2> sets H from hydrogen conservation.
+  using UpdateOrder = std::integer_sequence<int, IH2>;
+
+  /// Species whose relative change limits the semi-implicit substep
+  using StepLimitingSpecies = std::integer_sequence<int, IH2>;
+
+  /// The H2 network has no ghost species; this exists for API consistency
+  /// across networks
+  struct GhostSpecies {};
 
   // ----- cell values -----
   Real const n_H;  // The number density of hydrogen
@@ -162,7 +177,8 @@ class H2Network {
    * \return Real The result of evaluating the internal energy equation
    */
   template <class vec_type>
-  KOKKOS_FUNCTION Real Edot(const vec_type& y_in) const {
+  KOKKOS_FUNCTION Real Edot(const vec_type& y_in,
+                            const GhostSpecies& /*ghosts*/) const {
     if (isothermal) {
       return 0.0;
     }
@@ -188,7 +204,8 @@ class H2Network {
    * arrays.
    */
   template <class vec_type>
-  KOKKOS_FUNCTION CDRates_t<neqs - 1> CDRates(const vec_type& y_in) const {
+  KOKKOS_FUNCTION CDRates_t<neqs - 1> CDRates(
+      const vec_type& y_in, const GhostSpecies& /*ghosts*/) const {
     CDRates_t<neqs - 1> rates;
 
     // cr = cosmic ray, gr = dust grain
@@ -214,15 +231,50 @@ class H2Network {
     return rates;
   }
 
+  /*!
+   * \brief Setup the network for the next iteration of the ODE solver. The H2
+   * network has nothing to set up; this exists for API consistency across
+   * networks.
+   *
+   * \return GhostSpecies The (empty) ghost species
+   */
+  template <class vec_type>
+  KOKKOS_FUNCTION GhostSpecies SetupNextStep(const vec_type& /*y_in*/) const {
+    return GhostSpecies{};
+  }
+
+  /// The semi-implicit solver calls UpdateSpecies<K> for each species
+  static constexpr bool custom_species_update = true;
+
+  /*!
+   * \brief One backward-Euler step of H2 for the semi-implicit solver, then H
+   * from hydrogen conservation, x_H = x_H,tot - 2 x_H2. Updating H with its own
+   * backward-Euler step would use H2 at a different time level and let
+   * 2 x_H2 + x_H drift.
+   */
+  template <int K, class vec_type>
+  KOKKOS_FUNCTION void UpdateSpecies(const vec_type& y, const Real* y_n,
+                                     const GhostSpecies& ghosts,
+                                     const Real h) const {
+    static_assert(K == IH2, "H2 network updates only H2; H follows from it");
+    const auto rates = CDRates(y, ghosts);
+    const Real x_H_tot = 2.0 * y_n[IH2] + y_n[IH];
+    y(IH2) = (y_n[IH2] + h * rates.creation(IH2)) /
+             (1.0 + h * rates.destruction(IH2));
+    y(IH) = Kokkos::fmax(x_H_tot - 2.0 * y(IH2), 0.0);
+  }
+
   template <class vec_type1, class vec_type2>
   KOKKOS_FUNCTION void evaluate_function(const Real /*t*/, const Real /*dt*/,
                                          const vec_type1& y_in,
                                          vec_type2& f) const {
+    const GhostSpecies ghosts = SetupNextStep(y_in);
+
     // ----- Internal energy equation -----
-    f(IIE) = Edot(y_in);
+    f(IIE) = Edot(y_in, ghosts);
 
     // ----- Creation & Destruction Rates -----
-    const auto rates = CDRates(y_in);
+    const auto rates = CDRates(y_in, ghosts);
 
     // Compute the changes
     for (size_t i = 0; i < neqs - 1; i++) {
