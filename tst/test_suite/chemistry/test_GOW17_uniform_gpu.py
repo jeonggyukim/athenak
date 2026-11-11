@@ -10,7 +10,16 @@ import athena_read
 import pathlib
 import numpy as np
 
-ode_solvers = ["kokkos_BDF"]
+ode_solvers = ["kokkos_BDF", "semi_implicit"]
+
+# Relative tolerances of the comparisons. The semi-implicit solver has no error
+# control; its error at the default semi_implicit_cfl = 0.1 is about 1%.
+big_step_rtol = {"kokkos_BDF": 1e-5, "semi_implicit": 2e-2}
+cfl_dependence_rtol = {"kokkos_BDF": 5e-3, "semi_implicit": 2e-2}
+
+# The time series is stored from a kokkos_BDF run and compared output by output;
+# other solvers take a different number of cycles
+time_series_ode_solvers = ["kokkos_BDF"]
 
 # These come from Athena++ at t=1e6. Equilibrium is reached somewhere around t=1e2 or 1e3
 # but we're running the test longer to let any potential small errors compound into
@@ -87,7 +96,9 @@ def run_gow17_uniform_big_step(ode_solver, mpi=False):
                 assert test_arr.size == fiducial_size, (
                     f"The {key} dataset has the wrong size."
                 )
-                assert np.allclose(test_arr, fiducial_arr, atol=0), (
+                assert np.allclose(
+                    test_arr, fiducial_arr, atol=0, rtol=big_step_rtol[ode_solver]
+                ), (
                     f"The {key} dataset contains incorrect value(s)."
                 )
     finally:
@@ -214,7 +225,10 @@ def run_gow17_cfl_dependence(ode_solver, mpi=False):
 
             # Tolerances set to account for the tolerances given to the ODE solver
             assert np.allclose(
-                low_cfl_data[key], high_cfl_data[key], atol=5e-6, rtol=5e-3
+                low_cfl_data[key],
+                high_cfl_data[key],
+                atol=5e-6,
+                rtol=cfl_dependence_rtol[ode_solver],
             ), f"The {key} datasets don't match with different CFL numbers"
     finally:
         testutils.cleanup()
@@ -232,7 +246,7 @@ def test_gow17_cfl_dependence_cpu(ode_solver):
     run_gow17_cfl_dependence(ode_solver)
 
 
-@pytest.mark.parametrize("ode_solver", ode_solvers)
+@pytest.mark.parametrize("ode_solver", time_series_ode_solvers)
 def test_gow17_uniform_time_series_cpu(ode_solver):
     """CPU Test for GOW17 time series problem."""
     run_gow17_uniform_time_series(ode_solver)

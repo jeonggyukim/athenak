@@ -167,6 +167,8 @@ template void
 Chemistry::UpdateChemistry<ode_solvers::KokkosBDF, GOW17Network>();
 template void
 Chemistry::UpdateChemistry<ode_solvers::SemiImplicit, H2Network>();
+template void
+Chemistry::UpdateChemistry<ode_solvers::SemiImplicit, GOW17Network>();
 
 /*!
  * \brief Return the name of the chemical species at scalar_idx

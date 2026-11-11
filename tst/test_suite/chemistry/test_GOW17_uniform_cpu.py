@@ -20,7 +20,7 @@ def test_gow17_cfl_dependence_cpu(ode_solver):
     gow17_uniform.run_gow17_cfl_dependence(ode_solver)
 
 
-@pytest.mark.parametrize("ode_solver", gow17_uniform.ode_solvers)
+@pytest.mark.parametrize("ode_solver", gow17_uniform.time_series_ode_solvers)
 def test_gow17_uniform_time_series_cpu(ode_solver):
     """CPU Test for GOW17 time series problem."""
     gow17_uniform.run_gow17_uniform_time_series(ode_solver)

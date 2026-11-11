@@ -103,6 +103,8 @@ TaskStatus Chemistry::UpdateChemistryTask(Driver* d, int stage) {
       UpdateChemistry<ode_solvers::ForwardEuler, GOW17Network>();
     } else if (ode_solver == "kokkos_BDF") {
       UpdateChemistry<ode_solvers::KokkosBDF, GOW17Network>();
+    } else if (ode_solver == "semi_implicit") {
+      UpdateChemistry<ode_solvers::SemiImplicit, GOW17Network>();
     }
   }
 
