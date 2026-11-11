@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 #include "athena.hpp"
@@ -43,6 +44,14 @@ constexpr bool IsValidOrder(std::integer_sequence<int, K...>, const int n) {
   }
   return true;
 }
+
+/// True if the network sets `custom_species_update = true`
+template <typename ode_t, typename = void>
+struct UsesUpdateSpecies : std::false_type {};
+template <typename ode_t>
+struct UsesUpdateSpecies<ode_t,
+                         std::void_t<decltype(ode_t::custom_species_update)>>
+    : std::bool_constant<ode_t::custom_species_update> {};
 }  // namespace semi_implicit_detail
 
 /*!
@@ -79,6 +88,12 @@ constexpr bool IsValidOrder(std::integer_sequence<int, K...>, const int n) {
  *   - `CDRates(y, ghosts)`, the creation and destruction rates, used as
  *     `f(k) = creation(k) - y(k) * destruction(k)`.
  *   - `Edot(y, ghosts)`, the internal energy equation.
+ * Optionally, a network sets `static constexpr bool custom_species_update =
+ * true` and provides `template <int K> void UpdateSpecies(y, y_n, ghosts, h)`,
+ * which then replaces the update of every species K in `UpdateOrder`. A network
+ * uses it for cheaper per-species rates, or to update several species together;
+ * those then appear once in `UpdateOrder`. Without it, the full `CDRates` is
+ * evaluated once per species.
  *
  * \tparam ode_t The type of the chemical network to solve
  */
@@ -250,8 +265,12 @@ class SemiImplicit {
   KOKKOS_FUNCTION void UpdateOne_(const Real* y_n, const ghost_type& ghosts,
                                   const Real h) {
     auto& y = ode_system.y;
-    const auto rates = ode_system.CDRates(y, ghosts);
-    y(K) = (y_n[K] + h * rates.creation(K)) / (1.0 + h * rates.destruction(K));
+    if constexpr (semi_implicit_detail::UsesUpdateSpecies<ode_t>::value) {
+      ode_system.template UpdateSpecies<K>(y, y_n, ghosts, h);
+    } else {
+      const auto rates = ode_system.CDRates(y, ghosts);
+      y(K) = (y_n[K] + h * rates.creation(K)) / (1.0 + h * rates.destruction(K));
+    }
   }
 };
 }  // namespace ode_solvers
