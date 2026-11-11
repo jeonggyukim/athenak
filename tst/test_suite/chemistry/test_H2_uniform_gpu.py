@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from test_suite import testutils
 
-ode_solvers = ["forward_euler", "kokkos_BDF"]
+ode_solvers = ["forward_euler", "kokkos_BDF", "semi_implicit"]
 input_file = "inputs/H2_uniform_test.athinput"
 
 

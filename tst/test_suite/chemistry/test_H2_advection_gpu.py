@@ -10,7 +10,7 @@ import athena_read
 import pathlib
 import numpy as np
 
-ode_solvers = ["forward_euler", "kokkos_BDF"]
+ode_solvers = ["forward_euler", "kokkos_BDF", "semi_implicit"]
 
 
 class constants:

@@ -56,6 +56,8 @@ Chemistry::Chemistry(MeshBlockPack* ppack, ParameterInput* pin)
     ode_solvers::ForwardEuler<H2Network>::GetSettings(pin, "chemistry");
   } else if (ode_solver == "kokkos_BDF") {
     ode_solvers::KokkosBDF<H2Network>::GetSettings(pin, "chemistry");
+  } else if (ode_solver == "semi_implicit") {
+    ode_solvers::SemiImplicit<H2Network>::GetSettings(pin, "chemistry");
   }
 }
 
@@ -163,6 +165,8 @@ template void
 Chemistry::UpdateChemistry<ode_solvers::ForwardEuler, GOW17Network>();
 template void
 Chemistry::UpdateChemistry<ode_solvers::KokkosBDF, GOW17Network>();
+template void
+Chemistry::UpdateChemistry<ode_solvers::SemiImplicit, H2Network>();
 
 /*!
  * \brief Return the name of the chemical species at scalar_idx
