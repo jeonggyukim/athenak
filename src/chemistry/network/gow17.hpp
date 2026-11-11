@@ -149,11 +149,11 @@ class GOW17Network {
   /// Species order for the semi-implicit solver. Each species reads the new
   /// values of those before it: He+ feeds H+, C+, H2+ and O+; the H2+ -> H3+
   /// chain comes before the ions it creates; CHx and OHx before CO; H2 last,
-  /// since it changes slowly and every ion reacts with it.
+  /// since it changes slowly and every ion reacts with it. HCO+ is not listed:
+  /// CO and HCO+ create each other, and UpdateSpecies<ICO> solves them together.
   using UpdateOrder =
       std::integer_sequence<int, IHE_plus, ISi_plus, IH2_plus, IH3_plus,
-                            IH_plus, IO_plus, IC_plus, ICHx, IOHx, ICO,
-                            IHCO_plus, IH2>;
+                            IH_plus, IO_plus, IC_plus, ICHx, IOHx, ICO, IH2>;
 
   /// Species whose relative change limits the semi-implicit substep. The ions
   /// relax to equilibrium within a substep and need no limit; H2 and CO are the
@@ -785,15 +785,27 @@ class GOW17Network {
           k2body_[i2body_OH_O] * g.O + k2body_[i2body_Hep_OH] * y[IHE_plus] +
           kph_[iph_OHx];
     } else if constexpr (K == ICO) {
-      c = k2body_[i2body_CH_O] * y[ICHx] * g.O +
-          k2body_[i2body_OH_C] * y[IOHx] * g.C +
-          k2body_[i2body_HCOp_e] * y[IHCO_plus] * g.e;
-      d = kcr_[4] + kcr_[5] + k2body_[i2body_H3p_CO] * y[IH3_plus] +
-          k2body_[i2body_Hep_CO] * y[IHE_plus] + kph_[iph_CO];
-    } else if constexpr (K == IHCO_plus) {
-      c = (kcr_[5] + k2body_[i2body_H3p_CO] * y[IH3_plus]) * y[ICO] +
-          k2body_[i2body_Cp_OH] * y[IC_plus] * y[IOHx];
-      d = k2body_[i2body_HCOp_e] * g.e;
+      // CO and HCO+ together, backward Euler on the 2x2
+      //   (1 + d1 h) CO - b h HCO+ = CO^n + a h
+      //   -cc h CO + (1 + d2 h) HCO+ = HCO+^n + f h
+      // b <= d2 and cc <= d1, so det >= 1 + (d1 + d2) h > 0 and both solutions
+      // are sums of non-negative terms.
+      const Real u = units_time_cgs;
+      const Real a = u * (k2body_[i2body_CH_O] * y[ICHx] * g.O +
+                          k2body_[i2body_OH_C] * y[IOHx] * g.C);
+      const Real b = u * k2body_[i2body_HCOp_e] * g.e;
+      const Real d1 = u * (kcr_[4] + kcr_[5] +
+                           k2body_[i2body_H3p_CO] * y[IH3_plus] +
+                           k2body_[i2body_Hep_CO] * y[IHE_plus] + kph_[iph_CO]);
+      const Real f = u * k2body_[i2body_Cp_OH] * y[IC_plus] * y[IOHx];
+      const Real cc = u * (kcr_[5] + k2body_[i2body_H3p_CO] * y[IH3_plus]);
+      const Real d2 = u * k2body_[i2body_HCOp_e] * g.e;
+      const Real A = 1.0 + d1 * h;
+      const Real B = 1.0 + d2 * h;
+      const Real det = A * B - b * cc * h * h;
+      y[ICO] = (B * (y_n[ICO] + a * h) + b * h * (y_n[IHCO_plus] + f * h)) / det;
+      y[IHCO_plus] = (y_n[IHCO_plus] + f * h + cc * h * y[ICO]) / B;
+      return;
     } else if constexpr (K == IH2) {
       c = k2body_[i2body_H3p_C] * y[IH3_plus] * g.C +
           k2body_[i2body_H3p_O] * y[IH3_plus] * g.O +
