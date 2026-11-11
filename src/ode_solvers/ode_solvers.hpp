@@ -12,5 +12,6 @@
 
 #include "ode_solvers/forward_euler.hpp"
 #include "ode_solvers/kokkos_bdf.hpp"
+#include "ode_solvers/semi_implicit.hpp"
 
 #endif  // ODE_SOLVERS_ODE_SOLVERS_HPP_
