@@ -17,6 +17,7 @@
 #include "parameter_input.hpp"
 #include "tasklist/task_list.hpp"
 #include "chemistry2/inputs/cell_inputs.hpp"
+#include "chemistry2/network/gow17.hpp"
 #include "chemistry2/network/h2.hpp"
 #include "chemistry2/solvers/semi_implicit.hpp"
 #include "chemistry2/unit_factors.hpp"
@@ -34,6 +35,7 @@ struct Chemistry2TaskIDs {
 //! Settings of every registered network, read once; only the active one is used
 struct NetworkSettings {
   H2::Settings h2;
+  GOW17::Settings gow17;
 };
 
 class Chemistry2 {

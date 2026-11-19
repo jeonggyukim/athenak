@@ -22,12 +22,17 @@ int main(int argc, char *argv[]) {
   // Registry
   report.Expect(chemistry2::Find("H2", "semi_implicit") == 0, "Find H2 + semi_implicit");
   report.Expect(chemistry2::Find("H2", "kokkos_BDF") == -1, "unknown solver gives -1");
-  report.Expect(chemistry2::Find("GOW17", "semi_implicit") == -1,
+  report.Expect(chemistry2::Find("GOW17", "semi_implicit") == 1,
+                "Find GOW17 + semi_implicit");
+  report.Expect(chemistry2::Find("NCR", "semi_implicit") == -1,
                 "unknown network gives -1");
   report.Expect(chemistry2::Find("h2", "semi_implicit") == -1,
                 "names are case-sensitive");
-  report.Expect(chemistry2::List() == "H2 + semi_implicit", "List: " +
-                chemistry2::List());
+  report.Expect(chemistry2::List() == "H2 + semi_implicit, GOW17 + semi_implicit",
+                "List: " + chemistry2::List());
+  report.Expect(chemistry2::SpeciesCount("GOW17") == 12 &&
+                chemistry2::SpeciesCount("H2") == 2 &&
+                chemistry2::SpeciesCount("NCR") == -1, "SpeciesCount");
 
   bool called_h2 = false;
   const bool found = chemistry2::Dispatch(0, [&](auto pair) {
@@ -39,7 +44,8 @@ int main(int argc, char *argv[]) {
   report.Expect(found && called_h2,
                 "Dispatch(0) calls f with the H2 + semi_implicit pair");
   bool called = false;
-  report.Expect(!chemistry2::Dispatch(1, [&](auto) { called = true; }) && !called,
+  report.Expect(!chemistry2::Dispatch(chemistry2::NUM_PAIRS, [&](auto) { called = true; })
+                && !called,
                 "Dispatch of an unregistered index calls nothing");
 
   // Unit factors: each factor times its inverse is 1 to rounding
