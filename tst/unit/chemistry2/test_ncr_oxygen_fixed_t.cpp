@@ -69,8 +69,10 @@ int main(int argc, char *argv[]) {
     }
     const Real x_hi = 1.0 - 2.0*y[Net::IH2] - y[Net::IH_PLUS];
     const Real x_oi = c.x_o - y[3] - y[4];
-    std::printf("  log T %.1f: x_H+ %.3e; O I %.3e O II %.3e O III %.3e (per O)\n", lt,
-                y[Net::IH_PLUS], x_oi/c.x_o, y[3]/c.x_o, y[4]/c.x_o);
+    std::printf("  log T %.1f: x_H+ %.3e; O I %.3e O II %.3e O III %.3e (per O); H I "
+                "collisional ionization NCR/Voronov %.3f\n", lt, y[Net::IH_PLUS],
+                x_oi/c.x_o, y[3]/c.x_o, y[4]/c.x_o,
+                chemistry2::ncr::CollIonHI(T)/data.ci.Rate(1, 1, T));
     const double lock = (data.ct.CtIon(8, 8, T)/data.ct.CtRec(8, 7, T))*
                         y[Net::IH_PLUS]/x_hi;
     worst_ct = std::fmax(worst_ct, std::fabs((y[3]/x_oi)/lock - 1.0));
