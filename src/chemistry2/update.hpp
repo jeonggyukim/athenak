@@ -38,9 +38,12 @@ template <class Net>
 const typename Net::Settings &SettingsOf(const NetworkSettings &s) {
   if constexpr (std::is_same_v<Net, H2>) {
     return s.h2;
-  } else {
-    static_assert(std::is_same_v<Net, GOW17>, "add the network's settings to SettingsOf");
+  } else if constexpr (std::is_same_v<Net, GOW17>) {
     return s.gow17;
+  } else {
+    static_assert(std::is_same_v<Net, GOW17Analytic>,
+                  "add the network's settings to SettingsOf");
+    return s.gow17_analytic;
   }
 }
 

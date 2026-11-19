@@ -36,6 +36,7 @@ struct Chemistry2TaskIDs {
 struct NetworkSettings {
   H2::Settings h2;
   GOW17::Settings gow17;
+  GOW17Analytic::Settings gow17_analytic;
 };
 
 class Chemistry2 {
