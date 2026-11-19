@@ -19,6 +19,7 @@
 
 #include "chemistry2/network/gow17.hpp"
 #include "chemistry2/network/h2.hpp"
+#include "chemistry2/solvers/kokkos_bdf.hpp"
 #include "chemistry2/solvers/semi_implicit.hpp"
 
 namespace chemistry2 {
@@ -30,7 +31,7 @@ struct Pair {
 };
 
 using Pairs = std::tuple<Pair<H2, SemiImplicit>, Pair<GOW17, SemiImplicit>,
-                         Pair<GOW17Analytic, SemiImplicit>>;
+                         Pair<GOW17Analytic, SemiImplicit>, Pair<GOW17, KokkosBDF>>;
 
 constexpr int NUM_PAIRS = static_cast<int>(std::tuple_size_v<Pairs>);
 

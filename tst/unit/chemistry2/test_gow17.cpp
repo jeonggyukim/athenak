@@ -22,8 +22,10 @@
 #include "units/units.hpp"
 #include "chemistry/chemistry_utils.hpp"
 #include "chemistry/network/gow17.hpp"
+#include "ode_solvers/kokkos_bdf.hpp"
 #include "ode_solvers/semi_implicit.hpp"
 #include "chemistry2/network/gow17.hpp"
+#include "chemistry2/solvers/kokkos_bdf.hpp"
 #include "chemistry2/solvers/semi_implicit.hpp"
 
 namespace {
@@ -261,6 +263,35 @@ int main(int argc, char *argv[]) {
     report.Expect(dy[N_LONG/2] <= 1.0e-5, "long solves, median species <= 1e-5");
     report.Expect(dy[N_LONG - 1] <= 0.3 && max_e <= 1.0e-2,
                   "long solves, max species <= 0.3 and energy <= 1e-2");
+  }
+
+  // Kokkos BDF on both, tight tolerances: two converged solutions of the same equations
+  {
+    constexpr int N_BDF = 20;
+    double worst_y = 0.0, worst_e = 0.0;
+    for (int n = 0; n < N_BDF; ++n) {
+      const State s = Draw();
+      const Real dt = std::pow(10.0, -3.0 + 3.0*n/(N_BDF - 1));  // 1e-3 to 1 Myr
+      OldCell oc(s);
+      Old old = oc.Make(s);
+      const ode_solvers::KokkosBDFSettings s_old{0.0, 1.0e-8, 1.0e-14};
+      ode_solvers::KokkosBDF<Old> bdf(s_old, old, 0.0, dt);
+      bdf.SolveODE();
+      Real y[NSPEC];
+      for (int k = 0; k < NSPEC; ++k) y[k] = s.y[k];
+      Real e = s.e;
+      const chemistry2::KokkosBDFSettings s_new{0.0, 1.0e-8, 1.0e-14};
+      chemistry2::KokkosBDF<New>::Solve(s_new, NewCell(s), 0.0, dt, y, e);
+      worst_e = std::fmax(worst_e, RelDiff(e, old.y(Old::IIE), 1e-300));
+      for (int k = 0; k < NSPEC; ++k) {
+        worst_y = std::fmax(worst_y, RelDiff(y[k], old.y(k), 1.0e-3*X_ELEM[k]));
+      }
+    }
+    std::printf("  kokkos_BDF rtol 1e-8, dt 1e-3-1 Myr: worst species %.2e, "
+                "energy %.2e\n", worst_y, worst_e);
+    // measured 2.9e-13 (species) and 1.1e-13 (energy), 2026-11-20
+    report.ExpectNear(worst_y, 0.0, 0.0, 1.0e-10, "kokkos_BDF, species vs src/chemistry");
+    report.ExpectNear(worst_e, 0.0, 0.0, 1.0e-10, "kokkos_BDF, energy vs src/chemistry");
   }
   return report.ExitCode();
 }
