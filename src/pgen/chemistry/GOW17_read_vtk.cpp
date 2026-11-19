@@ -29,6 +29,7 @@
 
 #include "athena.hpp"
 #include "chemistry/chemistry.hpp"
+#include "chemistry2/chemistry2.hpp"
 #include "eos/eos.hpp"
 #include "hydro/hydro.hpp"
 #include "mesh/mesh.hpp"
@@ -191,7 +192,9 @@ void ProblemGenerator::GOW17ReadVTK(ParameterInput *pin, const bool restart) {
   const VTKField &pres_f = FindField(fields, "pressure", fname);
   const VTKField &vel_f = FindField(fields, "velocity", fname);
 
-  const bool chemistry_on = (pmbp->pchemistry != nullptr);
+  // either module; both store GOW17's species in the same order
+  const bool chemistry_on = (pmbp->pchemistry != nullptr) ||
+                            (pmbp->pchemistry2 != nullptr);
   const Real gm1 = pmbp->phydro->peos->eos_data.gamma - 1.0;
 
   // Copy the file into a device array laid out per MeshBlock. Each block takes
@@ -251,8 +254,7 @@ void ProblemGenerator::GOW17ReadVTK(ParameterInput *pin, const bool restart) {
   initial_chemistry.sync_device();
   auto initial_chemistry_d = initial_chemistry.view_device();
 
-  const int chem_start =
-      chemistry_on ? pmbp->pchemistry->get_chemistry_scalars_first_idx() : 0;
+  const int chem_start = chemistry_on ? chemistry2::ChemistryScalarStart(pmbp) : 0;
 
   par_for(
       "pgen_GOW17_read_vtk", DevExeSpace(), 0, (nmb - 1), ks, ke, js, je, is, ie,

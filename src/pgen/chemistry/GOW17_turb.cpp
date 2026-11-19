@@ -24,6 +24,7 @@
 
 #include "athena.hpp"
 #include "chemistry/chemistry.hpp"
+#include "chemistry2/chemistry2.hpp"
 #include "eos/eos.hpp"
 #include "hydro/hydro.hpp"
 #include "mesh/mesh.hpp"
@@ -52,11 +53,14 @@ void ProblemGenerator::GOW17Turb(ParameterInput* pin, const bool restart) {
   // As in GOW17_uniform: with no <chemistry> block the module is absent and
   // this sets up the same state for a pure hydro run, which is what isolates
   // chemistry cost from hydro cost.
-  const bool chemistry_on = (pmbp->pchemistry != nullptr);
+  // Either module, <chemistry> or <chemistry2>; both store GOW17's species in the same
+  // order.
+  const bool chemistry_on = (pmbp->pchemistry != nullptr) ||
+                            (pmbp->pchemistry2 != nullptr);
 
   const Real n_H = pin->GetReal("problem", "n_H");
   const Real T_init = pin->GetOrAddReal("problem", "T_init", 1.0e4);
-  const Real mu_H = chemistry_on ? pmbp->pchemistry->mu_H
+  const Real mu_H = chemistry_on ? chemistry2::ChemistryMuH(pmbp)
                                  : pin->GetOrAddReal("problem", "mu_H", 1.4);
   const Real dens = n_H * pmbp->punit->hydrogen_mass_cgs * mu_H /
                     pmbp->punit->density_cgs();
@@ -86,8 +90,7 @@ void ProblemGenerator::GOW17Turb(ParameterInput* pin, const bool restart) {
   initial_chemistry.sync_device();
   auto initial_chemistry_d = initial_chemistry.view_device();
 
-  const int chem_start =
-      chemistry_on ? pmbp->pchemistry->get_chemistry_scalars_first_idx() : 0;
+  const int chem_start = chemistry_on ? chemistry2::ChemistryScalarStart(pmbp) : 0;
 
   par_for(
       "pgen_GOW17_turb", DevExeSpace(), 0, (pmbp->nmb_thispack - 1), ks, ke,
