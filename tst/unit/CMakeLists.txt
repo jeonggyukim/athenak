@@ -4,6 +4,28 @@
 
 file(GLOB_RECURSE UNIT_TESTS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*/test_*.cpp)
 
+# Benchmarks (bench_*.cpp) are built but not registered with ctest; run them by hand.
+file(GLOB_RECURSE UNIT_BENCHES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*/bench_*.cpp)
+foreach(src ${UNIT_BENCHES})
+  get_filename_component(dir ${src} DIRECTORY)
+  get_filename_component(module ${dir} NAME)
+  get_filename_component(name ${src} NAME_WE)
+  set(target ${module}_${name})
+  add_executable(${target} ${src})
+  target_include_directories(${target} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_BINARY_DIR})
+  target_link_libraries(${target} PRIVATE Kokkos::kokkos Kokkos::kokkoskernels
+                        Threads::Threads)
+  if (ENABLE_MPI)
+    target_link_libraries(${target} PRIVATE MPI::MPI_CXX)
+  endif()
+  if (ENABLE_OPENMP)
+    target_link_libraries(${target} PRIVATE OpenMP::OpenMP_CXX)
+  endif()
+endforeach()
+
 foreach(src ${UNIT_TESTS})
   get_filename_component(dir ${src} DIRECTORY)
   get_filename_component(module ${dir} NAME)
