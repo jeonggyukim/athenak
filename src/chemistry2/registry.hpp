@@ -52,7 +52,7 @@ std::string List(std::index_sequence<I...>) {
 }
 
 template <std::size_t... I>
-int NumSpecies(std::string_view net, std::index_sequence<I...>) {
+int SpeciesCount(std::string_view net, std::index_sequence<I...>) {
   int n = -1;
   ((n = (n < 0 && std::tuple_element_t<I, Pairs>::Network::NAME == net)
             ? std::tuple_element_t<I, Pairs>::Network::NSPEC : n), ...);
@@ -72,8 +72,8 @@ inline int Find(std::string_view net, std::string_view solver) {
 }
 
 //! Number of stored species of the network called net, or -1 if none is registered
-inline int NumSpecies(std::string_view net) {
-  return registry_detail::NumSpecies(net, std::make_index_sequence<NUM_PAIRS>{});
+inline int SpeciesCount(std::string_view net) {
+  return registry_detail::SpeciesCount(net, std::make_index_sequence<NUM_PAIRS>{});
 }
 
 //! The registered pairs, "network + solver, ..."

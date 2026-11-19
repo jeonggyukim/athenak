@@ -33,7 +33,7 @@ KOKKOS_INLINE_FUNCTION size_t LinearInterpIndex(const size_t len,
     while (x > xarr[i]) {
       i++;
     }
-    return i - 1;
+    return (i > 0) ? i - 1 : 0;  // x == xarr[0] gives the first interval
   }
 }
 
@@ -49,7 +49,7 @@ KOKKOS_INLINE_FUNCTION size_t LinearInterpIndex(
     while (x > xarr[i]) {
       i++;
     }
-    return i - 1;
+    return (i > 0) ? i - 1 : 0;  // x == xarr[0] gives the first interval
   }
 }
 
