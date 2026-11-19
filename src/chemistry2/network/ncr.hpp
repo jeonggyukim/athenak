@@ -27,6 +27,7 @@
 #include "chemistry2/network/network_config.hpp"
 #include "chemistry2/network/species_table.hpp"
 #include "chemistry2/thermo/dust.hpp"
+#include "chemistry2/thermo/ncr_terms.hpp"
 #include "chemistry2/thermo/thermo.hpp"
 #include "chemistry2/unit_factors.hpp"
 #include "units/units.hpp"
@@ -378,10 +379,10 @@ struct NCR {
       cooling += Thermo::CoolingCOR(sub.x_co, n_hi, n_h2, n_e, T,
                                     n_h*sub.x_co/grad_eff);
     }
-    if (c.s.h2_rovib_cooling) {
-      cooling += Thermo::CoolingH2(x_h2, n_hi, n_h2, n_h*c.s.x_he, n_h*y[IH_PLUS], n_e,
-                                   T);
+    if (c.s.h2_rovib_cooling && T < c.s.temp_hot1) {
+      cooling += ncr_terms::CoolingH2Moseley(x_h2, x_hi, n_h, T);
     }
+    cooling += ncr_terms::CoolingHII(x_e, y[IH_PLUS], n_h, T, ncr::AlphaBHII(T));
     cooling += Thermo::CoolingRec(c.s.zd, T, n_e, c.chi);
     cooling += Thermo::CoolingH2diss(x_hi, x_h2, sub.k_h2_h*n_h, sub.k_h2_h2*n_h);
     cooling += Thermo::CoolingHIion(x_hi, x_e, sub.k_coll_hi*n_h);
