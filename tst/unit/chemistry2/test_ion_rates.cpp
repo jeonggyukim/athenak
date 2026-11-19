@@ -20,6 +20,7 @@
 #include "check.hpp"
 #include "chemistry2/ions/rates/coll_ion_rate.hpp"
 #include "chemistry2/ions/rates/recomb_rate.hpp"
+#include "chemistry2/ions/ion_table.hpp"
 
 int main(int argc, char *argv[]) {
   Kokkos::ScopeGuard guard(argc, argv);
@@ -67,5 +68,35 @@ int main(int argc, char *argv[]) {
   report.ExpectNear(worst_sum, 0.0, 0.0, 1e-12, "fractions sum to 1");
   report.Expect(o6_peak > 0.1 && o6_peak < 0.3 && t_peak > 2e5 && t_peak < 4e5,
                 "O VI CIE peak 0.1-0.3 at 2e5-4e5 K");
+  // the ion RowTable (64 rows per octave) against the readers, O I-O IV links, where a
+  // rate is above 1e-30 cm^3 s^-1, T 1e2-1e7 K
+  {
+    const chemistry2::ions::IonRateData data(dir);
+    const chemistry2::RowGrid grid = chemistry2::RowGrid::Make(1.0, 1073741824.0,
+                                                               30*64 + 1);
+    const chemistry2::RowTable tab = chemistry2::ions::BuildIonTable(data, grid, Z, 3);
+    auto h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), tab.data);
+    double worst_tab = 0.0;
+    for (int i = 0; i < 400; ++i) {
+      const Real T = std::pow(10.0, 2.0 + 5.0*(i + 0.37)/400.0);
+      const chemistry2::Slot s = grid.Locate(T);
+      for (int q = 0; q < 3; ++q) {
+        const Real want[4] = {data.ci.Rate(Z, Z - q, T), data.ct.CtIon(Z, Z - q, T),
+                              data.rec.Rate(Z, Z - q - 1, T),
+                              data.ct.CtRec(Z, Z - q - 1, T)};
+        for (int k = 0; k < 4; ++k) {
+          const int c = q*chemistry2::ions::LINK_COLS + k;
+          const double got = h(s.i0, c) + s.w*(h(s.i1, c) - h(s.i0, c));
+          // above 1e-20 cm^3 s^-1: deeper in its Boltzmann tail (below ~1e4 K, 1e-30 to
+          // 1e-24) collisional ionization is up to 7% off at 64 rows per octave, and
+          // negligible against recombination (~1e-12)
+          const double e = (want[k] > 1e-20) ? std::fabs(got/want[k] - 1.0) : 0.0;
+          worst_tab = std::fmax(worst_tab, e);
+        }
+      }
+    }
+    std::printf("  ion table vs readers: worst relative %.2e\n", worst_tab);
+    report.ExpectNear(worst_tab, 0.0, 0.0, 3e-2, "ion table vs readers");
+  }
   return report.ExitCode();
 }
