@@ -66,6 +66,18 @@ KOKKOS_INLINE_FUNCTION Dual pow(const Dual a, const Real p) {
   const Real r = Kokkos::pow(a.v, p);
   return Dual(r, p*r*a.d/a.v);
 }
+KOKKOS_INLINE_FUNCTION Dual pow(const Real b, const Dual a) {
+  const Real r = Kokkos::pow(b, a.v);
+  return Dual(r, r*Kokkos::log(b)*a.d);
+}
+KOKKOS_INLINE_FUNCTION Dual pow(const Dual a, const Dual p) {
+  const Real la = Kokkos::log(a.v);
+  const Real r = Kokkos::exp(p.v*la);
+  return Dual(r, r*(p.d*la + p.v*a.d/a.v));
+}
+KOKKOS_INLINE_FUNCTION Dual log10(const Dual a) {
+  return Dual(Kokkos::log10(a.v), a.d/(a.v*2.302585092994046));
+}
 KOKKOS_INLINE_FUNCTION Dual fmax(const Dual a, const Dual b) { return (a.v >= b.v) ? a : b; }
 KOKKOS_INLINE_FUNCTION Dual fmin(const Dual a, const Dual b) { return (a.v <= b.v) ? a : b; }
 KOKKOS_INLINE_FUNCTION bool operator<(const Dual a, const Dual b) { return a.v < b.v; }
