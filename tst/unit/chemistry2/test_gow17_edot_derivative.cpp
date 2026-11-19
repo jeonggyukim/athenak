@@ -118,8 +118,8 @@ int main(int argc, char *argv[]) {
     const Net::Cell c = Net::MakeCell(1.0, GAMMA, sf, uf,
                                       chemistry2::CellInputs{1e-6, 1e-22, 0.0});
     Real ee = e;
-    const int nsub = chemistry2::SemiImplicit<Net>::Solve(
-        chemistry2::SemiImplicitSettings{0.1, 1.0e-12, 100000, true}, c, 0.0, 10.0, y, ee);
+    const chemistry2::SemiImplicitSettings si{0.1, 1.0e-12, 100000, true};
+    const int nsub = chemistry2::SemiImplicit<Net>::Solve(si, c, 0.0, 10.0, y, ee);
     std::printf("  below the rate floor: %d substeps\n", nsub);
     report.Expect(nsub < 1000, "below t_min_rates: substeps < 1000");
   }
