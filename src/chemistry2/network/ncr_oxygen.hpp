@@ -89,9 +89,14 @@ struct NCROxygen {
     return Base::Temperature(y, e, c.base);
   }
 
+  //! NCR's substep, with O I (for its cooling) from the stored oxygen ions
   KOKKOS_INLINE_FUNCTION static Substep Prepare(const Real *y, const Real e,
                                                 const Cell &c) {
-    return Base::Prepare(y, e, c.base);
+    Substep sub = Base::Prepare(y, e, c.base);
+    Real ions = 0.0;
+    for (int q = 1; q <= Q; ++q) ions += y[2 + q];
+    sub.x_oi = Kokkos::fmax(c.x_o - ions - sub.x_co, ncr::TINY);
+    return sub;
   }
 
   KOKKOS_INLINE_FUNCTION static Real IonCharge(const Real *y) {
