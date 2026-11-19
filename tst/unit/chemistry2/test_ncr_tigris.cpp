@@ -43,16 +43,17 @@ int main(int argc, char *argv[]) {
   const char *names[7] = {"C_H2", "D_H2", "C_H+", "D_H+", "x_e", "x_C+", "x_CO"};
   double worst[7] = {};
   double hc_err[2][3] = {};  // heating, cooling: count over 10%, median, max
-  std::vector<double> dh, dc;
+  std::vector<double> dh, dc, grp[4];
   int n = 0;
   std::string line;
   while (std::getline(in, line)) {
     if (line.empty() || line[0] == '#') continue;
     std::istringstream ls(line);
-    double n_h, T, x_h2, x_hii, x_e, g, xi, ref[7], heat_ref, cool_ref;
+    double n_h, T, x_h2, x_hii, x_e, g, xi, ref[7], heat_ref, cool_ref, grp_ref[4];
     ls >> n_h >> T >> x_h2 >> x_hii >> x_e >> g >> xi;
     for (double &r : ref) ls >> r;
     ls >> heat_ref >> cool_ref;
+    for (double &r : grp_ref) ls >> r;
     const chemistry2::UnitFactors u = chemistry2::MakeUnitFactors(
         n_h*MU_H*units::Units::hydrogen_mass_cgs, U_TIME, U_ENERGY, MU_H);
     const Net::Cell c = Net::MakeCell(1.0, GAMMA, st, u,
@@ -74,6 +75,29 @@ int main(int argc, char *argv[]) {
     const Net::HeatCool hc = Net::HeatingCooling(y, e, c, s);
     dh.push_back(Rel(hc.heating, heat_ref));
     dc.push_back(Rel(hc.cooling, cool_ref));
+    // the cooling by Tigris's groups: H I (Ly-alpha, collisional ionization), H II,
+    // H2 (rovibrational, collisional dissociation), other (C II, C I, O I, CO, grains)
+    {
+      namespace th = chemistry2;
+      using Th = th::Thermo;
+      const Real x_hi = s.x_hi, nn_hi = n_h*x_hi, nn_h2 = n_h*x_h2, nn_e = n_h*x_e;
+      const Real g_hi = (T > 3.0e3 ? Th::CoolingLya(x_hi, nn_e, T) : 0.0) +
+                        Th::CoolingHIion(x_hi, x_e, s.k_coll_hi*n_h);
+      const Real g_h2 = Th::CoolingH2(x_h2, nn_hi, nn_h2, n_h*0.1, n_h*x_hii, nn_e, T) +
+                        Th::CoolingH2diss(x_hi, x_h2, s.k_h2_h*n_h, s.k_h2_h2*n_h);
+      const Real vth = std::sqrt(2.*units::Units::k_boltzmann_cgs*T/
+                                 units::Units::CO_mass_cgs);
+      const Real g_oth = Th::CoolingCII(s.x_cii, nn_hi, nn_h2, nn_e, T) +
+                         Th::CoolingCI(s.x_ci, nn_hi, nn_h2, nn_e, T) +
+                         Th::CoolingOI(s.x_oi, nn_hi, nn_h2, nn_e, T) +
+                         (s.x_co > 0 ? Th::CoolingCOR(s.x_co, nn_hi, nn_h2, nn_e, T,
+                                                      n_h*s.x_co/(vth/3.086e20)) : 0.0) +
+                         Th::CoolingRec(1.0, T, nn_e, g);
+      const Real got_g[4] = {g_hi, 0.0, g_h2, g_oth};
+      for (int k = 0; k < 4; ++k) {
+        if (grp_ref[k] > 1e-3*cool_ref) grp[k].push_back(Rel(got_g[k], grp_ref[k]));
+      }
+    }
     ++n;
   }
   std::printf("  %d states:", n);
@@ -88,6 +112,14 @@ int main(int argc, char *argv[]) {
     std::printf("  %s vs Tigris NCR: median %.2e, max %.2e, %d of %zu over 10%%\n",
                 q ? "cooling" : "heating", hc_err[q][1], hc_err[q][2],
                 static_cast<int>(hc_err[q][0]), v.size());
+  }
+  const char *gname[4] = {"H I", "H II", "H2", "other"};
+  for (int k = 0; k < 4; ++k) {
+    std::sort(grp[k].begin(), grp[k].end());
+    if (grp[k].empty()) continue;
+    std::printf("  cooling group %-5s (where > 1e-3 of total): median %.2e, max %.2e, "
+                "%zu states\n", gname[k], grp[k][grp[k].size()/2], grp[k].back(),
+                grp[k].size());
   }
   report.Expect(n == 500, "500 states read");
   for (int k = 0; k < 7; ++k) {

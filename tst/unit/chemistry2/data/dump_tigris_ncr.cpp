@@ -72,9 +72,16 @@ int main() {
     v.shld_len = 0.0;
     Real cool, heat, td;
     r.EvaluateThermal(v, v.temp, 10.0, cool, heat, td);
+    const Real l_hi = r.CoolingHI(v.x_e, v.x_hi, v.nH, v.temp);
+    const Real l_hii = r.CoolingHII(v.x_e, v.x_hii, v.nH, v.temp);
+    const Real l_h2 = r.CoolingH2(v.x_h2, v.x_hi, v.nH, v.temp);
+    const Real l_oth = r.CoolingOther(v.x_e, v.x_hi, v.x_h2, v.x_hii, v.nH, v.temp,
+                                      v.dvdr, v.z_d, v.z_g, v.xi_cr, v.chi_fuv,
+                                      v.chi_ci, v.chi_co);
     std::printf("%.17e %.17e %.17e %.17e %.17e %.17e %.17e %.17e %.17e %.17e %.17e "
-                "%.17e %.17e %.17e %.17e %.17e\n", v.nH, v.temp, v.x_h2, v.x_hii, v.x_e,
-                G, v.xi_cr, c_h2, d_h2, c_hii, d_hii, x_e_new, x_cii, x_co, heat, cool);
+                "%.17e %.17e %.17e %.17e %.17e %.17e %.17e %.17e %.17e\n", v.nH, v.temp,
+                v.x_h2, v.x_hii, v.x_e, G, v.xi_cr, c_h2, d_h2, c_hii, d_hii, x_e_new,
+                x_cii, x_co, heat, cool, l_hi, l_hii, l_h2, l_oth);
   }
   return 0;
 }
