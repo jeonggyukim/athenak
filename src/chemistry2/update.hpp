@@ -34,6 +34,24 @@ KOKKOS_INLINE_FUNCTION void StoreSpecies(const DvceArray5D<Real> &w0, int m, int
   for (int n = 0; n < N; ++n) w0(m, first + n, k, j, i) = y[n];
 }
 
+//! |grad v| in code units for the LVG escape of CO lines: the mean over the active
+//! dimensions of |dv_d/dx_d|, centered differences, as in src/chemistry
+KOKKOS_INLINE_FUNCTION Real VelocityGradient(const DvceArray5D<Real> &w0, int m, int k,
+                                             int j, int i, const RegionSize &size,
+                                             bool multi_d, bool three_d) {
+  Real sum = Kokkos::fabs(w0(m, IVX, k, j, i + 1) - w0(m, IVX, k, j, i - 1))/size.dx1;
+  Real n_dim = 1.0;
+  if (multi_d) {
+    sum += Kokkos::fabs(w0(m, IVY, k, j + 1, i) - w0(m, IVY, k, j - 1, i))/size.dx2;
+    n_dim += 1.0;
+  }
+  if (three_d) {
+    sum += Kokkos::fabs(w0(m, IVZ, k + 1, j, i) - w0(m, IVZ, k - 1, j, i))/size.dx3;
+    n_dim += 1.0;
+  }
+  return 0.5*sum/n_dim;
+}
+
 template <class Net>
 const typename Net::Settings &SettingsOf(const NetworkSettings &s) {
   if constexpr (std::is_same_v<Net, H2>) {
@@ -68,13 +86,19 @@ void Chemistry2::Update(const Real t, const Real dt) {
   const InputSource inputs = inputs_;
 
   const auto &indcs = pmy_pack_->pmesh->mb_indcs;
+  const auto sizes = pmy_pack_->pmb->mb_size.d_view;
+  const bool multi_d = pmy_pack_->pmesh->multi_d;
+  const bool three_d = pmy_pack_->pmesh->three_d;
+  const Real inv_time_cgs = 1.0/units.time_cgs;
   par_for("chemistry2", DevExeSpace(), 0, pmy_pack_->nmb_thispack - 1, indcs.ks,
           indcs.ke, indcs.js, indcs.je, indcs.is, indcs.ie,
           KOKKOS_LAMBDA(const int m, const int k, const int j, const int i) {
     Real y[NSPEC];  // NOLINT(runtime/arrays)
     LoadSpecies<NSPEC>(w0, m, first, k, j, i, y);
     Real e = w0(m, IEN, k, j, i);
-    const CellInputs in = inputs.Load(m, k, j, i);
+    CellInputs in = inputs.Load(m, k, j, i);
+    in.grad_v = VelocityGradient(w0, m, k, j, i, sizes(m), multi_d, three_d)*
+                inv_time_cgs;
     const typename Net::Cell cell = Net::MakeCell(w0(m, IDN, k, j, i), gamma, net,
                                                   units, in);
     Solver::Solve(solver, cell, t, dt, y, e);
