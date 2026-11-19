@@ -67,6 +67,19 @@ struct RowGrid {
     const int i0 = static_cast<int>(uc);
     return Slot{i0, i0 + 1, uc - static_cast<Real>(i0)};
   }
+  //! As Locate(T), and dw/dT: NqtLog has slope 2^-e in the octave [2^e, 2^(e+1)), and
+  //! 2^e is T with its mantissa bits cleared; zero where T is clamped
+  KOKKOS_INLINE_FUNCTION Slot Locate(const Real T, Real *dw_dT) const {
+    const Slot s = Locate(T);
+    const Real u = (NqtLog(Kokkos::fmax(T, t_min)) - nqt_t_min)*nqt_idt;
+    std::int64_t b;
+    std::memcpy(&b, &T, sizeof(double));
+    b &= 0x7FF0000000000000LL;
+    double octave;
+    std::memcpy(&octave, &b, sizeof(double));
+    *dw_dT = (T > t_min && u < static_cast<Real>(n_rows - 1)) ? nqt_idt/octave : 0.0;
+    return s;
+  }
   Real RowTemperature(const int i) const { return NqtExp(nqt_t_min + i/nqt_idt); }
 };
 
@@ -79,6 +92,10 @@ struct RowTable {
   KOKKOS_INLINE_FUNCTION Real At(const Slot &s, const int c) const {
     const Real v0 = data(s.i0, c);
     return v0 + s.w*(data(s.i1, c) - v0);
+  }
+  //! Upper row minus lower row of column c: dAt/dw
+  KOKKOS_INLINE_FUNCTION Real Diff(const Slot &s, const int c) const {
+    return data(s.i1, c) - data(s.i0, c);
   }
 };
 

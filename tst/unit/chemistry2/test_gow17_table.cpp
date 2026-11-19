@@ -93,5 +93,18 @@ int main(int argc, char *argv[]) {
               c_hi, t_hi, worst_lo, c_lo, t_lo);
   report.ExpectNear(worst_hi, 0.0, 0.0, 1.0e-2, "columns, values >= 1e-6 of max");
   report.ExpectNear(worst_lo, 0.0, 0.0, 3.0e-2, "columns, values 1e-12 to 1e-6 of max");
+
+  // dw/dT against a centered difference of w inside one row
+  double worst_dw = 0.0;
+  for (const Real T : {3.7, 47.0, 913.0, 1.1e4, 3.3e5, 7.7e7}) {
+    Real dw = 0.0;
+    const chemistry2::Slot s = table.grid.Locate(T, &dw);
+    const Real h = 1.0e-7*T;
+    const chemistry2::Slot sp = table.grid.Locate(T + h), sm = table.grid.Locate(T - h);
+    if (sp.i0 != s.i0 || sm.i0 != s.i0) continue;
+    const Real fd = (sp.w - sm.w)/(2.0*h);
+    worst_dw = std::fmax(worst_dw, std::fabs(dw - fd)/std::fabs(fd));
+  }
+  report.ExpectNear(worst_dw, 0.0, 0.0, 1.0e-6, "dw/dT against a centered difference");
   return report.ExitCode();
 }
