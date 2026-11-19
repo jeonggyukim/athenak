@@ -26,6 +26,7 @@
 //!   and Closures(y, y_n, cell).
 
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "athena.hpp"
@@ -52,6 +53,7 @@ struct SemiImplicitSettings {
 template <class Network>
 class SemiImplicit {
  public:
+  static constexpr std::string_view NAME = "semi_implicit";  // <chemistry2>/ode_solver
   static constexpr int NSPEC = Network::NSPEC;
   using Cell = typename Network::Cell;
   using Substep = typename Network::Substep;
