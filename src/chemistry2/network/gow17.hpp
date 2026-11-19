@@ -26,6 +26,7 @@
 #include "chemistry2/network/gow17_table.hpp"
 #include "chemistry2/network/network_config.hpp"
 #include "chemistry2/network/species_table.hpp"
+#include "chemistry2/thermo/dust.hpp"
 #include "chemistry2/thermo/thermo.hpp"
 #include "chemistry2/unit_factors.hpp"
 #include "units/units.hpp"
@@ -74,6 +75,11 @@ struct GOW17Network {
     bool h2_rovib_cooling;
     bool kgr_h2_const;
     RowTable table;       // temperature-only coefficients (TABLE only)
+    // gas-dust collisional exchange, at a fixed dust temperature [K]; alpha_gd <= 0
+    // selects Hollenbach & McKee (1989)
+    bool dust_cooling = false;
+    Real temp_dust = 10.0;
+    Real alpha_gd = 0.0;
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
@@ -98,7 +104,10 @@ struct GOW17Network {
                     pin->GetOrAddReal(b, "GOW17_Leff_CO_max", 3.0e20),
                     pin->GetOrAddBoolean(b, "GOW17_H2_rovib_cooling", true),
                     pin->GetOrAddBoolean(b, "is_kgrH2_const", false),
-                    RowTable()};
+                    RowTable(),
+                    pin->GetOrAddBoolean(b, "GOW17_dust_cooling", false),
+                    pin->GetOrAddReal(b, "GOW17_dust_temperature", 10.0),
+                    pin->GetOrAddReal(b, "GOW17_alpha_gd", 0.0)};
   }
 
   //! Constants of one cell over the hydro step
@@ -247,6 +256,9 @@ struct GOW17Network {
       cooling += Thermo::CoolingH2diss(g.h, y[IH2], r.k2[gow17::I2_H2_H],
                                        r.k2[gow17::I2_H2_H2]);
       cooling += Thermo::CoolingHIion(g.h, g.e, r.k2[gow17::I2_H_E]);
+      if (c.s.dust_cooling) {
+        cooling += dust::GasToDust(n_h, T, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
+      }
     }
     return HeatCool{heating, cooling};
   }
@@ -371,6 +383,9 @@ struct GOW17Network {
       }
       cooling += Thermo::CoolingH2diss(g.h, y[IH2], k_h2_h, k_h2_h2);
       cooling += Thermo::CoolingHIion(g.h, g.e, k_h_e);
+      if (c.s.dust_cooling) {
+        cooling += dust::GasToDust(n_h, Ts, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
+      }
     }
     return HeatCoolT<S>{heating, cooling};
   }
