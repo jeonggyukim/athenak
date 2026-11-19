@@ -19,6 +19,7 @@
 #include "chemistry2/inputs/cell_inputs.hpp"
 #include "chemistry2/network/gow17.hpp"
 #include "chemistry2/network/h2.hpp"
+#include "chemistry2/network/ncr.hpp"
 #include "chemistry2/solvers/kokkos_bdf.hpp"
 #include "chemistry2/solvers/semi_implicit.hpp"
 #include "chemistry2/unit_factors.hpp"
@@ -38,6 +39,7 @@ struct NetworkSettings {
   H2::Settings h2;
   GOW17::Settings gow17;
   GOW17Analytic::Settings gow17_analytic;
+  NCR::Settings ncr;
 };
 
 class Chemistry2 {
