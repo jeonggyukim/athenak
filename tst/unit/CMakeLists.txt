@@ -14,12 +14,19 @@ foreach(src ${UNIT_TESTS})
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_BINARY_DIR})
-  target_link_libraries(${target} PRIVATE Kokkos::kokkos Threads::Threads)
+  target_link_libraries(${target} PRIVATE Kokkos::kokkos Kokkos::kokkoskernels
+                        Threads::Threads)
   if (ENABLE_MPI)
     target_link_libraries(${target} PRIVATE MPI::MPI_CXX)
   endif()
   if (ENABLE_OPENMP)
     target_link_libraries(${target} PRIVATE OpenMP::OpenMP_CXX)
+  endif()
+  # Host and device results are compared bit for bit: no fused multiply-adds on either
+  # side (nvcc_wrapper passes -ffp-contract=off to the host compiler).
+  target_compile_options(${target} PRIVATE -ffp-contract=off)
+  if (Kokkos_ENABLE_CUDA)
+    target_compile_options(${target} PRIVATE -fmad=false)
   endif()
   add_test(NAME ${module}/${name} COMMAND ${target})
   set_tests_properties(${module}/${name} PROPERTIES LABELS unit TIMEOUT 60)

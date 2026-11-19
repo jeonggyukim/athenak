@@ -29,6 +29,12 @@ namespace chemistry2 {
 template <class Network>
 constexpr int NumSpecies() { return static_cast<int>(Network::rows.size()); }
 
+//! Creation rate c [per H per time] and destruction rate d [per time] of one species:
+//! dy/dt = c - d y
+struct CD {
+  Real c, d;
+};
+
 //! Subtract the atoms of element E in species I from x
 template <class Network, int E, std::size_t I>
 KOKKOS_INLINE_FUNCTION void SubtractAtoms(const Real *y, Real &x) {
