@@ -50,8 +50,37 @@ KOKKOS_INLINE_FUNCTION Dual operator*(const Dual a, const Dual b) {
   return Dual(a.v*b.v, a.d*b.v + a.v*b.d);
 }
 KOKKOS_INLINE_FUNCTION Dual operator/(const Dual a, const Dual b) {
-  const Real q = a.v/b.v;
-  return Dual(q, (a.d - q*b.d)/b.v);
+  const Real r = 1.0/b.v;
+  const Real q = a.v*r;
+  return Dual(q, (a.d - q*b.d)*r);
+}
+// Mixed with a constant: no work on its zero derivative
+KOKKOS_INLINE_FUNCTION Dual operator+(const Dual a, const Real b) {
+  return Dual(a.v + b, a.d);
+}
+KOKKOS_INLINE_FUNCTION Dual operator+(const Real a, const Dual b) {
+  return Dual(a + b.v, b.d);
+}
+KOKKOS_INLINE_FUNCTION Dual operator-(const Dual a, const Real b) {
+  return Dual(a.v - b, a.d);
+}
+KOKKOS_INLINE_FUNCTION Dual operator-(const Real a, const Dual b) {
+  return Dual(a - b.v, -b.d);
+}
+KOKKOS_INLINE_FUNCTION Dual operator*(const Dual a, const Real b) {
+  return Dual(a.v*b, a.d*b);
+}
+KOKKOS_INLINE_FUNCTION Dual operator*(const Real a, const Dual b) {
+  return Dual(a*b.v, a*b.d);
+}
+KOKKOS_INLINE_FUNCTION Dual operator/(const Dual a, const Real b) {
+  const Real r = 1.0/b;
+  return Dual(a.v*r, a.d*r);
+}
+KOKKOS_INLINE_FUNCTION Dual operator/(const Real a, const Dual b) {
+  const Real r = 1.0/b.v;
+  const Real q = a*r;
+  return Dual(q, -q*b.d*r);
 }
 KOKKOS_INLINE_FUNCTION Dual exp(const Dual a) {
   const Real e = Kokkos::exp(a.v);
@@ -64,7 +93,7 @@ KOKKOS_INLINE_FUNCTION Dual sqrt(const Dual a) {
 }
 KOKKOS_INLINE_FUNCTION Dual pow(const Dual a, const Real p) {
   const Real r = Kokkos::pow(a.v, p);
-  return Dual(r, p*r*a.d/a.v);
+  return Dual(r, p*r*(a.d/a.v));
 }
 KOKKOS_INLINE_FUNCTION Dual pow(const Real b, const Dual a) {
   const Real r = Kokkos::pow(b, a.v);
@@ -78,12 +107,35 @@ KOKKOS_INLINE_FUNCTION Dual pow(const Dual a, const Dual p) {
 KOKKOS_INLINE_FUNCTION Dual log10(const Dual a) {
   return Dual(Kokkos::log10(a.v), a.d/(a.v*2.302585092994046));
 }
-KOKKOS_INLINE_FUNCTION Dual fmax(const Dual a, const Dual b) { return (a.v >= b.v) ? a : b; }
-KOKKOS_INLINE_FUNCTION Dual fmin(const Dual a, const Dual b) { return (a.v <= b.v) ? a : b; }
+KOKKOS_INLINE_FUNCTION Dual fmax(const Dual a, const Dual b) {
+  return (a.v >= b.v) ? a : b;
+}
+KOKKOS_INLINE_FUNCTION Dual fmin(const Dual a, const Dual b) {
+  return (a.v <= b.v) ? a : b;
+}
+KOKKOS_INLINE_FUNCTION Dual fmax(const Dual a, const Real b) {
+  return (a.v >= b) ? a : Dual(b);
+}
+KOKKOS_INLINE_FUNCTION Dual fmin(const Dual a, const Real b) {
+  return (a.v <= b) ? a : Dual(b);
+}
 KOKKOS_INLINE_FUNCTION bool operator<(const Dual a, const Dual b) { return a.v < b.v; }
 KOKKOS_INLINE_FUNCTION bool operator>(const Dual a, const Dual b) { return a.v > b.v; }
 KOKKOS_INLINE_FUNCTION bool operator<=(const Dual a, const Dual b) { return a.v <= b.v; }
 KOKKOS_INLINE_FUNCTION bool operator>=(const Dual a, const Dual b) { return a.v >= b.v; }
+
+// Real overloads, so code templated on Real or Dual calls dual::exp etc. for both
+KOKKOS_INLINE_FUNCTION Real exp(const Real a) { return Kokkos::exp(a); }
+KOKKOS_INLINE_FUNCTION Real log(const Real a) { return Kokkos::log(a); }
+KOKKOS_INLINE_FUNCTION Real log10(const Real a) { return Kokkos::log10(a); }
+KOKKOS_INLINE_FUNCTION Real sqrt(const Real a) { return Kokkos::sqrt(a); }
+KOKKOS_INLINE_FUNCTION Real pow(const Real a, const Real p) { return Kokkos::pow(a, p); }
+KOKKOS_INLINE_FUNCTION Real fmax(const Real a, const Real b) {
+  return Kokkos::fmax(a, b);
+}
+KOKKOS_INLINE_FUNCTION Real fmin(const Real a, const Real b) {
+  return Kokkos::fmin(a, b);
+}
 
 //! The value of a Real or a Dual, for code templated on either
 KOKKOS_INLINE_FUNCTION Real Value(const Real a) { return a; }

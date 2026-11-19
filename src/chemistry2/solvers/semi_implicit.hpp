@@ -75,8 +75,14 @@ class SemiImplicit {
       e = Kokkos::fmax(e, 0.0);
 
       Substep sub = Network::Prepare(y, e, cell);
-      const Real edot = Network::Edot(y, e, cell, sub);
-      const Real dedot_de = EnergyDerivative(y, e, cell, sub, edot);
+      Real edot, dedot_de;
+      if constexpr (HasEdotDerivative<Network>::value) {
+        edot = Network::EdotWithDerivative(y, e, cell, sub, &dedot_de);
+        dedot_de = Kokkos::fmin(dedot_de, 0.0);
+      } else {
+        edot = Network::Edot(y, e, cell, sub);
+        dedot_de = EnergyDerivative(y, e, cell, sub, edot);
+      }
       const Real t_left = t_end - t_now;
       const Real h = (n >= s.nsub_max - 1)
                          ? t_left
@@ -104,9 +110,6 @@ class SemiImplicit {
                                                       const Substep &sub,
                                                       const Real edot) {
     if (edot == 0.0 || e <= 0.0) return 0.0;
-    if constexpr (HasEdotDerivative<Network>::value) {
-      return Kokkos::fmin(Network::EdotDerivative(y, e, cell, sub), 0.0);
-    }
     const Real de = DE_REL*e;
     const Real edot_p = Network::Edot(y, e + de, cell, sub);
     return Kokkos::fmin((edot_p - edot)/de, 0.0);
@@ -165,7 +168,8 @@ class SemiImplicit {
   static constexpr bool HasCustomUpdate() { return CustomUpdateTrait<N, K>::value; }
 
   //! A network that sets `static constexpr bool EDOT_DERIVATIVE = true` supplies
-  //! EdotDerivative(y, e, cell, sub), d(edot)/de at fixed species
+  //! EdotWithDerivative(y, e, cell, sub, &dedot_de): edot, and d(edot)/de at fixed
+  //! species, from one evaluation
   template <class N, class = void>
   struct HasEdotDerivative : std::false_type {};
   template <class N>

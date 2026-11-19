@@ -137,48 +137,60 @@ KOKKOS_INLINE_FUNCTION GOW17TemperatureRates LookupRates(const RowTable &t,
   return r;
 }
 
-//! The temperature-only coefficients of the heating and cooling terms
+//! Column c at slot s as a Real, or as a dual::Dual whose derivative is the row
+//! difference times dw_dT; each row pair is read once
+template <class S>
+KOKKOS_INLINE_FUNCTION S RowCoef(const RowTable &t, const Slot &s, const Real dw_dT,
+                                 const int c) {
+  const Real v0 = t.data(s.i0, c);
+  const Real dv = t.data(s.i1, c) - v0;
+  if constexpr (std::is_same_v<S, dual::Dual>) {
+    return dual::Dual(v0 + s.w*dv, dv*dw_dT);
+  } else {
+    return v0 + s.w*dv;
+  }
+}
+
+//! The temperature-only coefficients of the cooling terms, at T_cap
+template <class S>
 struct GOW17ThermoCoefficients {
-  Thermo::CIIRateCoefficients cii;
-  Real cii_boltz;
-  Thermo::CIRateCoefficients ci;
-  Real ci_boltz[3];
-  Thermo::OIRateCoefficients oi;
-  Real oi_boltz[3];
-  Thermo::H2GeffRateCoefficients h2geff;
-  Thermo::H2CoolingCoefficients h2cool;
-  Real lya_fac, lya_k01;
+  Thermo::CIIRateCoefficientsT<S> cii;
+  S cii_boltz;
+  Thermo::CIRateCoefficientsT<S> ci;
+  S ci_boltz[3];
+  Thermo::OIRateCoefficientsT<S> oi;
+  S oi_boltz[3];
+  Thermo::H2CoolingCoefficientsT<S> h2cool;
 };
 
-KOKKOS_INLINE_FUNCTION GOW17ThermoCoefficients LookupThermo(const RowTable &t,
-                                                            const Slot &s) {
-  GOW17ThermoCoefficients c;
-  c.cii.k10e = t.At(s, C_CII);
-  c.cii.k10HI = t.At(s, C_CII + 1);
-  c.cii.k10H2 = t.At(s, C_CII + 2);
-  c.cii_boltz = t.At(s, C_CII_BOLTZ);
-  Real *ci[9] = {&c.ci.k10HI, &c.ci.k20HI, &c.ci.k21HI, &c.ci.k10H2, &c.ci.k20H2,
-                 &c.ci.k21H2, &c.ci.k10e, &c.ci.k20e, &c.ci.k21e};
-  Real *oi[9] = {&c.oi.k10HI, &c.oi.k20HI, &c.oi.k21HI, &c.oi.k10H2, &c.oi.k20H2,
-                 &c.oi.k21H2, &c.oi.k10e, &c.oi.k20e, &c.oi.k21e};
+template <class S>
+KOKKOS_INLINE_FUNCTION GOW17ThermoCoefficients<S> LookupThermo(const RowTable &t,
+                                                               const Slot &s,
+                                                               const Real dw_dT) {
+  auto at = [&](const int c) { return RowCoef<S>(t, s, dw_dT, c); };
+  GOW17ThermoCoefficients<S> c;
+  c.cii.k10e = at(C_CII);
+  c.cii.k10HI = at(C_CII + 1);
+  c.cii.k10H2 = at(C_CII + 2);
+  c.cii_boltz = at(C_CII_BOLTZ);
+  S *ci[9] = {&c.ci.k10HI, &c.ci.k20HI, &c.ci.k21HI, &c.ci.k10H2, &c.ci.k20H2,
+              &c.ci.k21H2, &c.ci.k10e, &c.ci.k20e, &c.ci.k21e};
+  S *oi[9] = {&c.oi.k10HI, &c.oi.k20HI, &c.oi.k21HI, &c.oi.k10H2, &c.oi.k20H2,
+              &c.oi.k21H2, &c.oi.k10e, &c.oi.k20e, &c.oi.k21e};
   for (int i = 0; i < 9; ++i) {
-    *ci[i] = t.At(s, C_CI + i);
-    *oi[i] = t.At(s, C_OI + i);
+    *ci[i] = at(C_CI + i);
+    *oi[i] = at(C_OI + i);
   }
   for (int i = 0; i < 3; ++i) {
-    c.ci_boltz[i] = t.At(s, C_CI_BOLTZ + i);
-    c.oi_boltz[i] = t.At(s, C_OI_BOLTZ + i);
+    c.ci_boltz[i] = at(C_CI_BOLTZ + i);
+    c.oi_boltz[i] = at(C_OI_BOLTZ + i);
   }
-  c.h2geff.geff_H = t.At(s, C_H2GEFF);
-  c.h2geff.geff_H2 = t.At(s, C_H2GEFF + 1);
-  c.h2cool.LHI = t.At(s, C_H2COOL);
-  c.h2cool.LH2 = t.At(s, C_H2COOL + 1);
-  c.h2cool.LHe = t.At(s, C_H2COOL + 2);
-  c.h2cool.LHplus = t.At(s, C_H2COOL + 3);
-  c.h2cool.Le = t.At(s, C_H2COOL + 4);
-  c.h2cool.LTE = t.At(s, C_H2COOL + 5);
-  c.lya_fac = t.At(s, C_LYA);
-  c.lya_k01 = t.At(s, C_LYA + 1);
+  c.h2cool.LHI = at(C_H2COOL);
+  c.h2cool.LH2 = at(C_H2COOL + 1);
+  c.h2cool.LHe = at(C_H2COOL + 2);
+  c.h2cool.LHplus = at(C_H2COOL + 3);
+  c.h2cool.Le = at(C_H2COOL + 4);
+  c.h2cool.LTE = at(C_H2COOL + 5);
   return c;
 }
 
