@@ -51,6 +51,14 @@ std::string List(std::index_sequence<I...>) {
   return s;
 }
 
+template <std::size_t... I>
+int NumSpecies(std::string_view net, std::index_sequence<I...>) {
+  int n = -1;
+  ((n = (n < 0 && std::tuple_element_t<I, Pairs>::Network::NAME == net)
+            ? std::tuple_element_t<I, Pairs>::Network::NSPEC : n), ...);
+  return n;
+}
+
 template <class F, std::size_t... I>
 bool Dispatch(int idx, F &&f, std::index_sequence<I...>) {
   return ((idx == static_cast<int>(I) ? (f(std::tuple_element_t<I, Pairs>{}), true)
@@ -61,6 +69,11 @@ bool Dispatch(int idx, F &&f, std::index_sequence<I...>) {
 //! Index of the pair (network, solver) in Pairs, or -1
 inline int Find(std::string_view net, std::string_view solver) {
   return registry_detail::Find(net, solver, std::make_index_sequence<NUM_PAIRS>{});
+}
+
+//! Number of stored species of the network called net, or -1 if none is registered
+inline int NumSpecies(std::string_view net) {
+  return registry_detail::NumSpecies(net, std::make_index_sequence<NUM_PAIRS>{});
 }
 
 //! The registered pairs, "network + solver, ..."

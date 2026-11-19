@@ -30,6 +30,10 @@ add_executable(
         chemistry/chemistry_tasks.cpp
         chemistry/chemistry.cpp
 
+        chemistry2/chemistry2.cpp
+        chemistry2/chemistry2_tasks.cpp
+        chemistry2/update_h2_semi_implicit.cpp
+
         coordinates/adm.cpp
         coordinates/coordinates.cpp
         coordinates/excision.cpp

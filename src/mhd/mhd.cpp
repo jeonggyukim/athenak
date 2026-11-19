@@ -23,6 +23,7 @@
 #include "bvals/bvals.hpp"
 #include "mhd/mhd.hpp"
 #include "chemistry/chemistry.hpp"
+#include "chemistry2/chemistry2.hpp"
 
 namespace mhd {
 //----------------------------------------------------------------------------------------
@@ -104,6 +105,9 @@ MHD::MHD(MeshBlockPack *ppack, ParameterInput *pin) :
   // Add more passive scalars to be used for chemistry
   if (pin->DoesBlockExist("chemistry")) {
     nscalars += chemistry::Chemistry::SetupGetNumChemistryScalars(ppack, pin, nscalars);
+  }
+  if (pin->DoesBlockExist("chemistry2")) {
+    nscalars += chemistry2::Chemistry2::NumScalars(pin);
   }
 
   // Viscosity (only constructed if needed)

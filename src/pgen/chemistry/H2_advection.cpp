@@ -13,6 +13,7 @@
 
 #include "athena.hpp"
 #include "chemistry/chemistry.hpp"
+#include "chemistry2/chemistry2.hpp"
 #include "coordinates/cell_locations.hpp"
 #include "eos/eos.hpp"
 #include "globals.hpp"
@@ -42,8 +43,7 @@ void RefinementCondition(MeshBlockPack* pmbp) {
 
   // Set the refinement parameters
   const Real valmax = 0.2;
-  const int field = pmbp->pchemistry->get_chemistry_scalars_first_idx() +
-                    chemistry::H2Network::IH;
+  const int field = chemistry2::ChemistryScalarStart(pmbp) + chemistry::H2Network::IH;
 
   // Mark blocks for refinement
   par_for_outer(
@@ -103,7 +103,7 @@ void ProblemGenerator::H2Advection(ParameterInput* pin, const bool restart) {
   const Real n_H = pin->GetReal("problem", "n_H");
   const Real iso_cs = pin->GetReal("hydro", "iso_sound_speed");
   HydPrim1D hydro;
-  hydro.d = n_H * pmbp->punit->hydrogen_mass_cgs * pmbp->pchemistry->mu_H /
+  hydro.d = n_H * pmbp->punit->hydrogen_mass_cgs * chemistry2::ChemistryMuH(pmbp) /
             pmbp->punit->density_cgs();
   hydro.vx = pin->GetReal("problem", "vx_kms");
   hydro.vy = 0.0;
@@ -116,7 +116,7 @@ void ProblemGenerator::H2Advection(ParameterInput* pin, const bool restart) {
   const Real gaussian_std = pin->GetOrAddReal("problem", "gaussian_std", 0.1);
 
   // Assign values
-  const int chem_start = pmbp->pchemistry->get_chemistry_scalars_first_idx();
+  const int chem_start = chemistry2::ChemistryScalarStart(pmbp);
   par_for(
       "pgen_H2_hydro", DevExeSpace(), 0, (pmbp->nmb_thispack - 1), ks, ke, js,
       je, is, ie, KOKKOS_LAMBDA(int m, int k, int j, int i) {

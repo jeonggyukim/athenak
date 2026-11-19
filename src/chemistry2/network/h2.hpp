@@ -13,12 +13,16 @@
 //!   x_H = x_H,tot - 2 x_H2, with x_H,tot taken at the start of the substep.
 
 #include <array>
+#include <string>
 #include <string_view>
 #include <utility>
 
 #include "athena.hpp"
+#include "parameter_input.hpp"
+#include "chemistry2/inputs/cell_inputs.hpp"
 #include "chemistry2/network/network_config.hpp"
 #include "chemistry2/network/species_table.hpp"
+#include "chemistry2/unit_factors.hpp"
 #include "units/units.hpp"
 
 namespace chemistry2 {
@@ -43,14 +47,32 @@ struct H2 {
   static constexpr Real ALPHA_GD = 3.2e-34;  // gas-dust coupling, DESPOTIC
   static constexpr Real T_FLOOR = 1.0;       // no cooling below [K]
 
-  //! Constants of one cell over the hydro step
-  struct Cell {
-    Real n_h;       // [cm^-3]
-    Real gamma;
-    Real u_time;    // time unit [s]
-    Real u_energy;  // energy density unit [erg cm^-3]
+  struct Settings {
     bool const_cv;  // heat capacity of atomic gas, whatever x_H2
   };
+
+  static Settings ReadSettings(ParameterInput *pin, const std::string &block) {
+    return Settings{pin->GetOrAddBoolean(block, "h2_constant_cv", false)};
+  }
+
+  //! Constants of one cell over the hydro step
+  struct Cell {
+    Real n_h;           // [cm^-3]
+    Real inv_n_h;
+    Real gamma;
+    Real u_time;        // time unit [s]
+    Real u_energy;      // energy density unit [erg cm^-3]
+    Real inv_u_energy;
+    bool const_cv;
+  };
+
+  KOKKOS_INLINE_FUNCTION static Cell MakeCell(const Real rho, const Real gamma,
+                                              const Settings &s, const UnitFactors &u,
+                                              const CellInputs &) {
+    const Real n_h = rho*u.nh_per_density;
+    return Cell{n_h, 1.0/n_h, gamma, u.time_cgs, u.energy_cgs, u.energy_per_cgs,
+                s.const_cv};
+  }
 
   //! Rate coefficients of one substep; the H2 network has none that depend on T
   struct Substep {};
@@ -64,7 +86,7 @@ struct H2 {
     const Real x_h2_0 = Kokkos::fmin(Kokkos::fmax(x_h2, 0.0), 0.5);
     const Real cv = units::Units::k_boltzmann_cgs*((1. - 2.*x_h2_0) + x_h2_0 + X_HE)/
                     (c.gamma - 1.0);
-    return e*c.u_energy/c.n_h/cv;
+    return e*c.u_energy*c.inv_n_h/cv;
   }
 
   //! de/dt in code units
@@ -73,7 +95,7 @@ struct H2 {
     const Real t = Temperature(y, e, c);
     if (t < T_FLOOR) return 0.0;
     const Real dedt = 0.0 - ALPHA_GD*c.n_h*Kokkos::sqrt(t)*t;
-    return c.u_time*(dedt*c.n_h/c.u_energy);
+    return c.u_time*(dedt*c.n_h*c.inv_u_energy);
   }
 
   template <int K>

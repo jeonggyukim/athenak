@@ -31,6 +31,7 @@
 #include "gravity/gravity.hpp"
 #include "outputs.hpp"
 #include "chemistry/chemistry.hpp"
+#include "chemistry2/chemistry2.hpp"
 
 #if MPI_PARALLEL_ENABLED
 #include <mpi.h>
@@ -293,6 +294,12 @@ BaseTypeOutput::BaseTypeOutput(ParameterInput *pin, Mesh *pm, OutputParameters o
               vname.append("_"+pm->pmb_pack->pchemistry->GetSpeciesNames(n));
           }
         }
+        if (pm->pmb_pack->pchemistry2 != nullptr) {
+          auto pchem2 = pm->pmb_pack->pchemistry2;
+          if (n >= pchem2->FirstScalar() && n <= pchem2->LastScalar()) {
+            vname.append("_" + pchem2->SpeciesName(n));
+          }
+        }
 
         outvars.emplace_back(vname,n,&(pm->pmb_pack->phydro->u0));
       }
@@ -316,6 +323,12 @@ BaseTypeOutput::BaseTypeOutput(ParameterInput *pin, Mesh *pm, OutputParameters o
           if(n>=pm->pmb_pack->pchemistry->get_chemistry_scalars_first_idx()
              && n<=pm->pmb_pack->pchemistry->get_chemistry_scalars_last_idx()) {
               vname.append("_"+pm->pmb_pack->pchemistry->GetSpeciesNames(n));
+          }
+        }
+        if (pm->pmb_pack->pchemistry2 != nullptr) {
+          auto pchem2 = pm->pmb_pack->pchemistry2;
+          if (n >= pchem2->FirstScalar() && n <= pchem2->LastScalar()) {
+            vname.append("_" + pchem2->SpeciesName(n));
           }
         }
 
@@ -445,6 +458,12 @@ BaseTypeOutput::BaseTypeOutput(ParameterInput *pin, Mesh *pm, OutputParameters o
               vname.append("_"+pm->pmb_pack->pchemistry->GetSpeciesNames(n));
           }
         }
+        if (pm->pmb_pack->pchemistry2 != nullptr) {
+          auto pchem2 = pm->pmb_pack->pchemistry2;
+          if (n >= pchem2->FirstScalar() && n <= pchem2->LastScalar()) {
+            vname.append("_" + pchem2->SpeciesName(n));
+          }
+        }
 
         outvars.emplace_back(vname,n,&(pm->pmb_pack->pmhd->u0));
       }
@@ -470,6 +489,12 @@ BaseTypeOutput::BaseTypeOutput(ParameterInput *pin, Mesh *pm, OutputParameters o
           if(n>=pm->pmb_pack->pchemistry->get_chemistry_scalars_first_idx()
              && n<=pm->pmb_pack->pchemistry->get_chemistry_scalars_last_idx()) {
               vname.append("_"+pm->pmb_pack->pchemistry->GetSpeciesNames(n));
+          }
+        }
+        if (pm->pmb_pack->pchemistry2 != nullptr) {
+          auto pchem2 = pm->pmb_pack->pchemistry2;
+          if (n >= pchem2->FirstScalar() && n <= pchem2->LastScalar()) {
+            vname.append("_" + pchem2->SpeciesName(n));
           }
         }
 
