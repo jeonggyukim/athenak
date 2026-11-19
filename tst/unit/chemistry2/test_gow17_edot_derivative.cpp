@@ -17,6 +17,7 @@
 #include "athena.hpp"
 #include "check.hpp"
 #include "chemistry2/network/gow17.hpp"
+#include "chemistry2/solvers/semi_implicit.hpp"
 
 namespace {
 using Net = chemistry2::GOW17;
@@ -98,5 +99,29 @@ int main(int argc, char *argv[]) {
   report.ExpectNear(worst_edot, 0.0, 0.0, 1e-13, "edot of the dual pass equals Edot");
   report.ExpectNear(e999, 0.0, 0.0, 1e-6, "d(edot)/de, 99.9th percentile");
   report.ExpectNear(emax, 0.0, 0.0, 1e-4, "d(edot)/de, worst state");
+
+  // Gas below the rate floor (t_min_rates 10 K, T 5 K, n_H 1e5, xi_CR 1e-22, net
+  // cooling), dt 10 Myr: the solve must not shrink e one substep at a time up to
+  // nsub_max (measured 100000 substeps before the fix, 1 after, 2026-11-20)
+  {
+    Net::Settings sf = st;
+    sf.t_min_rates = 10.0;
+    sf.dust_cooling = false;
+    Real y[NSPEC] = {};
+    y[Net::IH2] = 0.5;
+    y[Net::ICO] = 1.5e-4;
+    y[Net::IC_PLUS] = 1.0e-8;
+    const Real n_h = 1.0e5;
+    const Real e = n_h*chemistry2::Thermo::CvCold(0.5, 0.1, 1.0e-8, GAMMA)*5.0/U_ENERGY;
+    const chemistry2::UnitFactors uf = chemistry2::MakeUnitFactors(
+        n_h*MU_H*units::Units::hydrogen_mass_cgs, U_TIME, U_ENERGY, MU_H);
+    const Net::Cell c = Net::MakeCell(1.0, GAMMA, sf, uf,
+                                      chemistry2::CellInputs{1e-6, 1e-22, 0.0});
+    Real ee = e;
+    const int nsub = chemistry2::SemiImplicit<Net>::Solve(
+        chemistry2::SemiImplicitSettings{0.1, 1.0e-12, 100000, true}, c, 0.0, 10.0, y, ee);
+    std::printf("  below the rate floor: %d substeps\n", nsub);
+    report.Expect(nsub < 1000, "below t_min_rates: substeps < 1000");
+  }
   return report.ExitCode();
 }
