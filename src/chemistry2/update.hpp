@@ -58,7 +58,12 @@ void Chemistry2::Update(const Real t, const Real dt) {
                              : pmy_pack_->phydro->peos->eos_data.gamma;
   const int first = first_scalar_;
   const UnitFactors units = units_;
-  const SemiImplicitSettings solver = semi_implicit_;
+  typename Solver::Settings solver;
+  if constexpr (std::is_same_v<typename Solver::Settings, KokkosBDFSettings>) {
+    solver = kokkos_bdf_;
+  } else {
+    solver = semi_implicit_;
+  }
   const typename Net::Settings net = SettingsOf<Net>(networks_);
   const InputSource inputs = inputs_;
 

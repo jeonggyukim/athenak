@@ -55,6 +55,7 @@ template <class Network>
 class SemiImplicit {
  public:
   static constexpr std::string_view NAME = "semi_implicit";  // <chemistry2>/ode_solver
+  using Settings = SemiImplicitSettings;
   static constexpr int NSPEC = Network::NSPEC;
   using Cell = typename Network::Cell;
   using Substep = typename Network::Substep;

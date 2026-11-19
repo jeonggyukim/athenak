@@ -19,6 +19,7 @@
 #include "chemistry2/inputs/cell_inputs.hpp"
 #include "chemistry2/network/gow17.hpp"
 #include "chemistry2/network/h2.hpp"
+#include "chemistry2/solvers/kokkos_bdf.hpp"
 #include "chemistry2/solvers/semi_implicit.hpp"
 #include "chemistry2/unit_factors.hpp"
 
@@ -81,6 +82,7 @@ class Chemistry2 {
   const int active_;  // index of the (network, solver) pair in the registry
   const UnitFactors units_;
   const SemiImplicitSettings semi_implicit_;
+  const KokkosBDFSettings kokkos_bdf_;
   const NetworkSettings networks_;
   const InputSource inputs_;
 };
