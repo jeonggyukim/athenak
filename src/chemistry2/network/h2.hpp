@@ -13,6 +13,7 @@
 //!   x_H = x_H,tot - 2 x_H2, with x_H,tot taken at the start of the substep.
 
 #include <array>
+#include <string_view>
 #include <utility>
 
 #include "athena.hpp"
@@ -23,6 +24,7 @@
 namespace chemistry2 {
 
 struct H2 {
+  static constexpr std::string_view NAME = "H2";  // <chemistry2>/network
   static constexpr std::array<SpeciesRow, 2> rows = {
       Species("H2").H(2),
       Species("H").H(1)};
