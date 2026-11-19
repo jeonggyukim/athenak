@@ -63,13 +63,24 @@ KOKKOS_INLINE_FUNCTION auto LinearInterp(const Real x0, const Real x1, const Y y
   return y0 + ((y1 - y0) * (1.0 / (x1 - x0))) * (x - x0);
 }
 
+// The CO tables are static constexpr class members. Under CUDA they are passed by value,
+// so device code does not reference the host copy; elsewhere by reference, since the
+// copy costs ~10% of the GOW17 kernel on CPU.
+#if defined(KOKKOS_ENABLE_CUDA)
+template <std::size_t N>
+using TableArg = const Kokkos::Array<Real, N>;
+#else
+template <std::size_t N>
+using TableArg = const Kokkos::Array<Real, N> &;
+#endif
+
 //---------------------------------------------------------------------------------------
 /*!
  * \brief Interpolation with index provided.
  */
 template <std::size_t N_xarr, std::size_t N_data, class X>
-KOKKOS_INLINE_FUNCTION X LP1Di(const Kokkos::Array<Real, N_xarr> xarr,
-                               const Kokkos::Array<Real, N_data> data,
+KOKKOS_INLINE_FUNCTION X LP1Di(TableArg<N_xarr> xarr,
+                               TableArg<N_data> data,
                                const int ix, const X x) {
   return LinearInterp(xarr[ix], xarr[ix + 1], data[ix], data[ix + 1], x);
 }
@@ -78,13 +89,11 @@ KOKKOS_INLINE_FUNCTION X LP1Di(const Kokkos::Array<Real, N_xarr> xarr,
 /*!
  * \brief 2D array bi-linear interpolation with index provided
  */
-// The tables are static constexpr class members: by value, so CUDA device code does not
-// reference the host copy
 template <std::size_t N_xarr, std::size_t N_yarr, std::size_t N_data, class X, class Y>
-KOKKOS_INLINE_FUNCTION auto LP2Di(const Kokkos::Array<Real, N_xarr> xarr,
-                                  const Kokkos::Array<Real, N_yarr> yarr,
+KOKKOS_INLINE_FUNCTION auto LP2Di(TableArg<N_xarr> xarr,
+                                  TableArg<N_yarr> yarr,
                                   const int lenx, const int ix, const int iy,
-                                  const Kokkos::Array<Real, N_data> data,
+                                  TableArg<N_data> data,
                                   const X x, const Y y) {
   const Real x0 = xarr[ix];
   const Real x1 = xarr[ix + 1];
