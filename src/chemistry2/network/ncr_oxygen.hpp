@@ -19,8 +19,10 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "athena.hpp"
+#include "chemistry2/ions/ion_cooling.hpp"
 #include "chemistry2/ions/ion_ladder.hpp"
 #include "chemistry2/ions/ion_table.hpp"
 #include "chemistry2/network/ncr.hpp"
@@ -56,32 +58,58 @@ struct NCROxygen {
   static constexpr bool MAX_STEP = true;
   static constexpr bool EDOT_DERIVATIVE = true;
 
+  static constexpr int N_COOL = (Q < 2) ? Q : 2;  // CHIANTI tables: O II, O III
+
   struct Settings {
     Base::Settings base;
     RowTable ions;  // oxygen links, on the NCR table's grid
+    ions::IonCoolingTable cool;  // O II, O III line cooling, on the same grid
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
-    Settings s{Base::ReadSettings(pin, b), RowTable()};
+    Settings s{Base::ReadSettings(pin, b), RowTable(), ions::IonCoolingTable()};
     // the ion data are read only when this chemical network is the one selected
     if (pin->GetOrAddString(b, "network", "") != std::string(NAME)) return s;
     const std::string dir = pin->GetOrAddString(b, "ion_data_dir",
                                                 "inputs/chemistry2/ions/");
     s.ions = ions::BuildIonTable(ions::IonRateData(dir), s.base.table.grid, 8, Q);
+    std::vector<std::string> names = {"o_2", "o_3"};
+    names.resize(N_COOL);
+    s.cool = ions::BuildIonCoolingTable(s.base.table.grid, dir + "ion_cooling/", names);
     return s;
   }
 
   struct Cell {
     Base::Cell base;
     RowTable ions;
+    ions::IonCoolingTable cool;
     Real x_o;  // oxygen per H
   };
 
   KOKKOS_INLINE_FUNCTION static Cell MakeCell(const Real rho, const Real gamma,
                                               const Settings &s, const UnitFactors &u,
                                               const CellInputs &in) {
-    return Cell{Base::MakeCell(rho, gamma, s.base, u, in), s.ions,
+    return Cell{Base::MakeCell(rho, gamma, s.base, u, in), s.ions, s.cool,
                 ncr::X_O_STD*s.base.zg};
+  }
+
+  //! Ion line cooling [erg s^-1 per H] at T, and its T derivative
+  KOKKOS_INLINE_FUNCTION static Real IonCooling(const Real *y, const Real T,
+                                                const Cell &c, Real *dcool_dT) {
+    const RowGrid &grid = c.base.s.table.grid;
+    Real dw = 0.0;
+    const Slot s = grid.Locate(T, &dw);
+    const Real n_e = y[IE]*c.base.n_h;
+    Real cool = 0.0, dcool = 0.0;
+    for (int k = 0; k < N_COOL; ++k) {
+      Real ln_l, dln_l_dw;
+      c.cool.LnLambda(s, n_e, k, &ln_l, &dln_l_dw);
+      const Real term = n_e*y[3 + k]*Kokkos::exp(ln_l);
+      cool += term;
+      dcool += term*dln_l_dw*dw;
+    }
+    *dcool_dT = dcool;
+    return cool;
   }
 
   using Substep = Base::Substep;
@@ -161,14 +189,25 @@ struct NCROxygen {
 
   KOKKOS_INLINE_FUNCTION static Real Edot(const Real *y, const Real e, const Cell &c,
                                           const Substep &sub) {
-    return Base::Edot(y, e, c.base, sub);
+    const Real T = Kokkos::fmax(Temperature(y, e, c), 1.0);
+    Real dcool_dT;
+    const Real fac = c.base.u_time*c.base.n_h*c.base.inv_u_energy;
+    return Base::Edot(y, e, c.base, sub) - fac*IonCooling(y, T, c, &dcool_dT);
   }
 
   KOKKOS_INLINE_FUNCTION static Real EdotWithDerivative(const Real *y, const Real e,
                                                         const Cell &c,
                                                         const Substep &sub,
                                                         Real *dedot_de) {
-    return Base::EdotWithDerivative(y, e, c.base, sub, dedot_de);
+    const Real edot = Base::EdotWithDerivative(y, e, c.base, sub, dedot_de);
+    const Real dT_de = c.base.u_energy*c.base.inv_n_h/
+                       Thermo::CvCold(y[IH2], c.base.s.x_he, y[IE], c.base.gamma);
+    const Real T = Kokkos::fmax(e*dT_de, 1.0);
+    Real dcool_dT;
+    const Real cool = IonCooling(y, T, c, &dcool_dT);
+    const Real fac = c.base.u_time*c.base.n_h*c.base.inv_u_energy;
+    *dedot_de -= fac*dcool_dT*dT_de;
+    return edot - fac*cool;
   }
 
   KOKKOS_INLINE_FUNCTION static void Closures(Real *, const Real *, const Cell &) {}

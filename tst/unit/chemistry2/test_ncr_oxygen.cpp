@@ -12,6 +12,8 @@
 
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <sstream>
 #include <string>
 
 #include "athena.hpp"
@@ -30,10 +32,13 @@ int main(int argc, char *argv[]) {
   std::string dir(__FILE__);
   dir = dir.substr(0, dir.find_last_of('/')) + "/../../../inputs/chemistry2/ions/";
   Net::Settings st{{1.0, 1.0, 0.1, 3.0e-17, true, true, 3.5e4, 5.7e-11, 3.086e20, true,
-                    false, 10.0, 0.0}, chemistry2::RowTable()};
+                    false, 10.0, 0.0}, chemistry2::RowTable(),
+                   chemistry2::ions::IonCoolingTable()};
   st.base.table = chemistry2::ncr::BuildNCRTable();
   st.ions = chemistry2::ions::BuildIonTable(chemistry2::ions::IonRateData(dir),
                                             st.base.table.grid, 8, 2);
+  st.cool = chemistry2::ions::BuildIonCoolingTable(st.base.table.grid,
+                                                   dir + "ion_cooling/", {"o_2", "o_3"});
   const Real n_h = 1.0;
   const chemistry2::UnitFactors uf = chemistry2::MakeUnitFactors(
       n_h*MU_H*units::Units::hydrogen_mass_cgs, U_TIME, U_ENERGY, MU_H);
@@ -67,5 +72,37 @@ int main(int argc, char *argv[]) {
                        chemistry2::NCR::XeMol(y[Net::IE], y[Net::IH2], c.base, sub.tc);
   std::printf("  x_e %.6g, sum of carriers %.6g\n", y[Net::IE], x_e_sum);
   report.ExpectNear(y[Net::IE], x_e_sum, 2e-2, 0.0, "electrons = sum of carriers");
+
+  // ion cooling: the table at a source node (log T 4.0, log n_e 0.0) against the
+  // CHIANTI file, and its T derivative against a centered difference
+  {
+    std::ifstream f(dir + "ion_cooling/lambda_o_2.txt");
+    std::string line;
+    double want_log = 0.0;
+    int row = 0;  // log T rows 3.00, 3.05, ...: log T 4.0 is row 20
+    while (std::getline(f, line)) {
+      if (line.empty() || line[0] == '#') continue;
+      std::istringstream is(line);
+      double v[17];
+      for (double &x : v) is >> x;
+      if (row == 20) want_log = v[4];  // log n_e = 0
+      ++row;
+    }
+    Real yc[Net::NSPEC] = {};
+    yc[Net::IE] = 1.0;  // n_e = n_H = 1
+    yc[3] = 1.0e-4;
+    Real d;
+    const double got = Net::IonCooling(yc, 1.0e4, c, &d)/(1.0*1.0e-4);
+    std::printf("  Lambda(O II, 1e4 K, n_e 1) table %.5e, CHIANTI %.5e\n", got,
+                std::pow(10.0, want_log));
+    report.ExpectNear(got, std::pow(10.0, want_log), 2e-2, 0.0,
+                      "O II cooling vs CHIANTI");
+    const Real T = 1.37e4, h = 1e-7*T;
+    Real d0, dp, dm;
+    Net::IonCooling(yc, T, c, &d0);
+    const Real fd = (Net::IonCooling(yc, T + h, c, &dp) -
+                     Net::IonCooling(yc, T - h, c, &dm))/(2*h);
+    report.ExpectNear(d0, fd, 1e-5, 0.0, "ion cooling T derivative");
+  }
   return report.ExitCode();
 }
