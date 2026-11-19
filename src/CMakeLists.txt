@@ -36,6 +36,7 @@ add_executable(
         chemistry2/update_gow17_semi_implicit.cpp
         chemistry2/update_gow17_kokkos_bdf.cpp
         chemistry2/update_ncr_semi_implicit.cpp
+        chemistry2/update_ncr_oxygen_semi_implicit.cpp
 
         coordinates/adm.cpp
         coordinates/coordinates.cpp
