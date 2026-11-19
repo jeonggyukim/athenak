@@ -32,6 +32,7 @@ enum : int {
   C_HII_FF = C_MOS + 4,        // free-free factor g_ff sqrt(T4) 1.422e-25
   C_HII_REC,                   // recombination energy times alpha_B [erg cm^3 s^-1]
   C_NEB,                       // nebular T-part exp(-38585.52/T) poly / sqrt(T)
+  C_ALPHA_A,                   // H+ case A recombination [cm^3 s^-1]
   N_NCR_COLS
 };
 
@@ -74,6 +75,7 @@ inline void FillNCRRow(const Real T, Real *row) {
   const Real poly = Kokkos::pow(10.0, (((((A[0]*l + A[1])*l + A[2])*l + A[3])*l +
                                         A[4])*l + A[5])*l + A[6]);
   row[C_NEB] = Kokkos::exp(-38585.52/T)*poly/Kokkos::sqrt(T);
+  row[C_ALPHA_A] = AlphaAHII(T);
 }
 
 inline RowTable BuildNCRTable(const int rows_per_octave = gow17::ROWS_PER_OCTAVE) {

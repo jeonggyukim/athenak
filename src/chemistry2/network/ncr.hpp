@@ -65,6 +65,7 @@ struct NCRNetwork {
     bool dust_cooling;
     Real temp_dust, alpha_gd;
     RowTable table;              // NCR rate table (TABLE only)
+    bool case_a = false;         // H+ recombination: case A instead of B (as Cloudy CIE)
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
@@ -86,7 +87,8 @@ struct NCRNetwork {
                     pin->GetOrAddBoolean(b, "NCR_H2_rovib_cooling", true),
                     pin->GetOrAddBoolean(b, "NCR_dust_cooling", false),
                     pin->GetOrAddReal(b, "NCR_dust_temperature", 10.0),
-                    pin->GetOrAddReal(b, "NCR_alpha_gd", 0.0), RowTable()};
+                    pin->GetOrAddReal(b, "NCR_alpha_gd", 0.0), RowTable(),
+                    pin->GetOrAddBoolean(b, "NCR_case_A", false)};
   }
 
   struct Cell {
@@ -128,7 +130,7 @@ struct NCRNetwork {
       const RowTable &t = c.s.table;
       *slot = t.grid.Locate(T);
       const Slot &s = *slot;
-      k.alpha_b = t.At(s, ncr::C_ALPHA_B);
+      k.alpha_b = t.At(s, c.s.case_a ? ncr::C_ALPHA_A : ncr::C_ALPHA_B);
       k.k_coll = t.At(s, ncr::C_K_COLL_HI);
       k.alpha_cii = t.At(s, ncr::C_ALPHA_CII);
       k.k_ch2p = t.At(s, ncr::C_K_CH2P);
@@ -141,7 +143,7 @@ struct NCRNetwork {
       k.ncr_hi = t.At(s, ncr::C_NCR_HI);
       k.k1619 = t.At(s, ncr::C_K1619);
     } else {
-      k.alpha_b = ncr::AlphaBHII(T);
+      k.alpha_b = c.s.case_a ? ncr::AlphaAHII(T) : ncr::AlphaBHII(T);
       k.k_coll = ncr::CollIonHI(T);
       k.alpha_cii = ncr::AlphaCII(T);
       k.k_ch2p = 3.3e-13*Kokkos::pow(T, -1.3)*Kokkos::exp(-23.0/T);
