@@ -29,6 +29,15 @@ class Thermo {
   Thermo() {}
   ~Thermo() = default;
 
+  // Level energies [erg], for the Boltzmann factors a rate table stores
+  KOKKOS_INLINE_FUNCTION static constexpr Real E10CII() { return E10CII_; }
+  KOKKOS_INLINE_FUNCTION static constexpr Real E10CI() { return E10CI_; }
+  KOKKOS_INLINE_FUNCTION static constexpr Real E20CI() { return E20CI_; }
+  KOKKOS_INLINE_FUNCTION static constexpr Real E21CI() { return E21CI_; }
+  KOKKOS_INLINE_FUNCTION static constexpr Real E10OI() { return E10OI_; }
+  KOKKOS_INLINE_FUNCTION static constexpr Real E20OI() { return E20OI_; }
+  KOKKOS_INLINE_FUNCTION static constexpr Real E21OI() { return E21OI_; }
+
   // Coefficients for the fine-structure coolers, the two H2 heating terms and H2
   // cooling, each a function of T alone.
   //
