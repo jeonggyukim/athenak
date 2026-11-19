@@ -368,6 +368,10 @@ struct NCRNetwork {
                                                         const Cell &c,
                                                         const Substep &sub) {
     const Real T = Kokkos::fmax(Temperature(y, e, c), 1.0);
+    if constexpr (TABLE) {
+      const HeatCoolT<Real> hc = HeatCoolTable<Real>(y, T, 1.0, c, sub);
+      return HeatCool{hc.heating, hc.cooling};
+    }
     const Real n_h = c.n_h, x_e = y[IE], x_h2 = y[IH2], x_hi = sub.x_hi;
     const Real n_hi = n_h*x_hi, n_h2 = n_h*x_h2, n_e = n_h*x_e;
     const Real k_ph_h2 = c.xi_diss_h2;
@@ -401,6 +405,132 @@ struct NCRNetwork {
       cooling += dust::GasToDust(n_h, T, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
     }
     return HeatCool{heating, cooling};
+  }
+
+  static constexpr bool EDOT_DERIVATIVE = TABLE;  // EdotWithDerivative, dual numbers
+
+  //! edot in code units, and d(edot)/de at fixed species and closures, from one pass
+  KOKKOS_INLINE_FUNCTION static Real EdotWithDerivative(const Real *y, const Real e,
+                                                        const Cell &c,
+                                                        const Substep &sub,
+                                                        Real *dedot_de) {
+    const Real dT_de = c.u_energy*c.inv_n_h/
+                       Thermo::CvCold(y[IH2], c.s.x_he, y[IE], c.gamma);
+    const Real T_raw = e*dT_de;
+    const Real T = Kokkos::fmax(T_raw, 1.0);
+    const Real seed = (T_raw >= 1.0) ? 1.0 : 0.0;
+    const auto hc = HeatCoolTable<dual::Dual>(y, T, seed, c, sub);
+    const Real fac = c.u_time*c.n_h*c.inv_u_energy;
+    *dedot_de = fac*(hc.heating.d - hc.cooling.d)*dT_de;
+    return fac*(hc.heating.v - hc.cooling.v);
+  }
+
+  template <class S>
+  struct HeatCoolT {
+    S heating, cooling;
+  };
+
+  //! Heating and cooling with the temperature-only factors from the NCR table; with
+  //! S = dual::Dual the derivative part is d/dT at fixed species and closures
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static HeatCoolT<S> HeatCoolTable(const Real *y, const Real T,
+                                                           const Real seed,
+                                                           const Cell &c,
+                                                           const Substep &sub) {
+    constexpr bool DERIV = std::is_same_v<S, dual::Dual>;
+    const RowTable &tab = c.s.table;
+    Real dw = 0.0;
+    Slot s_t;
+    if constexpr (DERIV) {
+      s_t = tab.grid.Locate(T, &dw);
+      dw *= seed;
+    } else {
+      s_t = (T == sub.T) ? sub.slot : tab.grid.Locate(T);
+    }
+    S Ts;
+    if constexpr (DERIV) {
+      Ts = dual::Dual(T, seed);
+    } else {
+      Ts = T;
+    }
+    auto col = [&](const int k) { return gow17::RowCoef<S>(tab, s_t, dw, k); };
+    const Real n_h = c.n_h, x_e = y[IE], x_h2 = y[IH2], x_hi = sub.x_hi;
+    const Real x_hii = y[IH_PLUS];
+    const Real n_hi = n_h*x_hi, n_h2 = n_h*x_h2, n_e = n_h*x_e;
+    const Real k_ph_h2 = c.xi_diss_h2;
+    // heating
+    const Thermo::H2GeffRateCoefficientsT<S> geff{col(gow17::C_H2GEFF),
+                                                  col(gow17::C_H2GEFF + 1)};
+    S kgr_n = sub.kgr*n_h;
+    if constexpr (DERIV) {
+      if (c.s.kgr_h2_t && T < c.s.temp_hot1) {
+        kgr_n.d = c.s.kgr_h2*c.s.zd*n_h*col(ncr::C_KGR_FAC).d;
+      }
+    }
+    S heating = Thermo::HeatingCRFrom(x_e, x_hi, x_h2, c.xi_cr,
+                                      Thermo::CRHeatPerH2(n_h));
+    heating += Thermo::HeatingPE(c.chi, c.s.zd, Ts, n_e);
+    heating += Thermo::HeatingH2grFrom(x_hi, x_h2, n_h, kgr_n, k_ph_h2, geff);
+    heating += Thermo::HeatingH2pumpFrom(x_hi, x_h2, n_h, k_ph_h2, geff);
+    heating += Thermo::HeatingH2diss(k_ph_h2, x_h2);
+    // cooling: fine-structure lines from GOW17's columns
+    const gow17::GOW17ThermoCoefficients<S> k = gow17::LookupThermo<S>(tab, s_t, dw);
+    S cooling = Thermo::CoolingCIIFrom(sub.x_cii, n_hi, n_h2, n_e, k.cii, k.cii_boltz);
+    cooling += Thermo::CoolingCIFrom(sub.x_ci, n_hi, n_h2, n_e, k.ci, k.ci_boltz[0],
+                                     k.ci_boltz[1], k.ci_boltz[2]);
+    cooling += Thermo::CoolingOIFrom(sub.x_oi, n_hi, n_h2, n_e, k.oi, k.oi_boltz[0],
+                                     k.oi_boltz[1], k.oi_boltz[2]);
+    if (T > 3.0e3) {
+      cooling += Thermo::CoolingLyaFrom(x_hi, n_e, col(gow17::C_LYA),
+                                        col(gow17::C_LYA + 1));
+    }
+    if (sub.x_co > 0.0) {
+      const S vth = dual::sqrt((2.*units::Units::k_boltzmann_cgs/
+                                units::Units::CO_mass_cgs)*Ts);
+      const S grad_eff = dual::fmax(vth*(1.0/c.s.leff_co_max), c.grad_v);
+      const S n_co_eff = (n_h*sub.x_co)/grad_eff;
+      cooling += Thermo::CoolingCOR(sub.x_co, n_hi, n_h2, n_e, Ts, n_co_eff);
+    }
+    if (c.s.h2_rovib_cooling && T < c.s.temp_hot1) {  // Moseley et al. (2021)
+      const Real x1 = n_hi + 5.0*n_h2, x2 = n_hi + 4.5*n_h2;
+      const Real x3 = n_hi + 0.75*n_h2, x4 = n_hi + 0.05*n_h2;
+      constexpr Real N1 = 50.0, N2 = 450.0, N3 = 25.0, N4 = 900.0;
+      const Real d1 = 0.7*x1/(1.0 + x1/N1) + 0.3*x1/(1.0 + x1/(10.0*N1));
+      const Real d2 = 0.35*x2/(1.0 + x2/N2) + 0.65*x2/(1.0 + x2/(10.0*N2));
+      const Real d3 = x3/(1.0 + x3/N3);
+      const Real d4 = 0.45*x4/(1.0 + x4/N4) + 0.55*x4/(1.0 + x4/(10.0*N4));
+      cooling += (col(ncr::C_MOS)*d1 + col(ncr::C_MOS + 1)*d2 + col(ncr::C_MOS + 2)*d3 +
+                  col(ncr::C_MOS + 3)*d4)*x_h2;
+    }
+    cooling += (col(ncr::C_HII_FF) + col(ncr::C_HII_REC))*(n_h*x_e*x_hii);
+    if (T < c.s.temp_hot1) {  // nebular lines
+      const S l = dual::log(Ts*1e-4);
+      const S f_red = 1.0/(1.0 + 0.12*dual::pow(x_e*n_h*1e-2, 0.38 - 0.12*l));
+      cooling += col(ncr::C_NEB)*f_red*(3.677602203699553e-21*c.s.zg*x_hii*x_e*n_h);
+    }
+    cooling += Thermo::CoolingRec(c.s.zd, Ts, n_e, c.chi);
+    // collisional H2 dissociation and H ionization: values from Prepare, derivative
+    // of their temperature dependence from the table
+    S k_h2_h = sub.k_h2_h*n_h, k_h2_h2 = sub.k_h2_h2*n_h, k_hi = sub.k_coll_hi*n_h;
+    if constexpr (DERIV) {
+      constexpr Real LN10 = 2.30258509299404590e0;
+      if (T > 7.0e2 && T < c.s.temp_hot1) {
+        const S inv_ncr = x_hi/col(ncr::C_NCR_HI) + 2.0*x_h2/col(ncr::C_NCR_H2);
+        const S n2 = n_h*inv_ncr;
+        const S inv = 1.0/(1.0 + n2);
+        const S e9 = (col(ncr::C_L9H)*n2 + col(ncr::C_L9L))*inv;
+        const S e10 = (col(ncr::C_L10H)*n2 + col(ncr::C_L10L))*inv;
+        k_h2_h.d = k_h2_h.v*LN10*e9.d;
+        k_h2_h2.d = k_h2_h2.v*LN10*e10.d;
+      }
+      k_hi.d = n_h*col(ncr::C_K_COLL_HI).d;
+    }
+    cooling += Thermo::CoolingH2diss(x_hi, x_h2, k_h2_h, k_h2_h2);
+    cooling += Thermo::CoolingHIion(x_hi, x_e, k_hi);
+    if (c.s.dust_cooling) {
+      cooling += dust::GasToDust(n_h, Ts, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
+    }
+    return HeatCoolT<S>{heating, cooling};
   }
 
   KOKKOS_INLINE_FUNCTION static void Closures(Real *, const Real *, const Cell &) {}
