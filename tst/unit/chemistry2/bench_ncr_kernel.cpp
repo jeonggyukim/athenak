@@ -8,7 +8,7 @@
 //!        NCR against GOW17 (rate table), on cells with the same n_H, T and H2 and H+
 //!        fractions.
 //!
-//!   usage: bench_ncr_kernel [n_cells] [dt_myr] [repeats] [n_h]
+//!   usage: bench_ncr_kernel [n_cells] [dt_myr] [repeats] [n_h] [g0]
 
 #include <algorithm>
 #include <cmath>
@@ -57,7 +57,8 @@ int main(int argc, char *argv[]) {
   const chemistry2::SemiImplicitSettings si{0.1, 1.0e-12, 100000, true};
   const chemistry2::UnitFactors uf = chemistry2::MakeUnitFactors(
       n_h*MU_H*units::Units::hydrogen_mass_cgs, U_TIME, U_ENERGY, MU_H);
-  const chemistry2::CellInputs in{1.0, 2.0e-16, 0.0};
+  const Real g0 = (argc > 5) ? std::atof(argv[5]) : 1.0;
+  const chemistry2::CellInputs in{g0, 2.0e-16, 0.0};
   Kokkos::View<int*> nsub("nsub", n);
   auto time_it = [&](auto kernel) {
     double best = 1e30;
