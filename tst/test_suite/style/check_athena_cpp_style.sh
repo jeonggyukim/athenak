@@ -24,7 +24,7 @@ curl https://raw.githubusercontent.com/cpplint/cpplint/master/cpplint.py \
 echo "Starting Google C++ Style cpplint.py test"
 # Use "python3 -u" to prevent buffering of sys.stdout,stderr.write()
 # calls in cpplint.py and mix-up in Jenkins logs,
-find ../../../src -type f \( -name "*.cpp" -o -name "*.hpp" \) \
+find ../../../src ../../unit -type f \( -name "*.cpp" -o -name "*.hpp" \) \
 -print | xargs python3 -u cpplint.py --filter=-build/include_subdir --counting=detailed
 if [ $? -ne 0 ]; then echo "ERROR: C++ style errors found"; rm -f cpplint.py; exit 1; fi
 rm -f cpplint.py
@@ -49,14 +49,14 @@ do
     grep -nrEi '^\s+#pragma' "$file"
     if [ $? -ne 1 ]; then echo "ERROR: Left justify any #pragma statements"; exit 1; fi
 
-done < <(find ../../../src -type f \( -name "*.cpp" -o -name "*.hpp" \) -print)
+done < <(find ../../../src ../../unit -type f \( -name "*.cpp" -o -name "*.hpp" \) -print)
 echo "End of \t, closing brace, and #pragma test"
 
 # Search src/ C++ source code for trailing whitespace errors
 # (Google C++ Style Linter does not check for this,
 # but flake8 via pycodestyle warning W291 will check *.py)
 echo "Checking for trailing whitespace in src/"
-find ../../../src -type f \( -name "*.cpp" -o -name "*.hpp*" \) \
+find ../../../src ../../unit -type f \( -name "*.cpp" -o -name "*.hpp*" \) \
 -exec grep -n -E " +$" {} +
 if [ $? -ne 1 ]; then echo "ERROR: Found C++ file(s) in src/ \
 with trailing whitespace"; exit 1; fi

@@ -34,6 +34,7 @@ endif()
 option(Athena_SINGLE_PRECISION "Compile for single precision" OFF)
 option(Athena_ENABLE_MPI "Compile with MPI parallelism enabled" OFF)
 option(Athena_ENABLE_OPENMP "Compile with OpenMP parallelism enabled" OFF)
+option(Athena_ENABLE_UNIT_TESTS "Compile the unit tests in tst/unit" OFF)
 set(PROBLEM built_in_pgens CACHE STRING "Name of problem generator function")
 
 #------ set macros exported to config.hpp ------------------------------------------------
@@ -292,5 +293,10 @@ target_include_directories(athena PUBLIC
 )
 
 configure_file(config.hpp.in config.hpp)
+
+if (Athena_ENABLE_UNIT_TESTS)
+  enable_testing()
+  add_subdirectory(tst/unit)
+endif()
 
 install( TARGETS athena DESTINATION bin )
