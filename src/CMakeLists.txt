@@ -33,6 +33,7 @@ add_executable(
         chemistry2/chemistry2.cpp
         chemistry2/chemistry2_tasks.cpp
         chemistry2/update_h2_semi_implicit.cpp
+        chemistry2/update_gow17_semi_implicit.cpp
 
         coordinates/adm.cpp
         coordinates/coordinates.cpp

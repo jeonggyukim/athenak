@@ -36,8 +36,12 @@ KOKKOS_INLINE_FUNCTION void StoreSpecies(const DvceArray5D<Real> &w0, int m, int
 
 template <class Net>
 const typename Net::Settings &SettingsOf(const NetworkSettings &s) {
-  static_assert(std::is_same_v<Net, H2>, "add the network's settings to SettingsOf");
-  return s.h2;
+  if constexpr (std::is_same_v<Net, H2>) {
+    return s.h2;
+  } else {
+    static_assert(std::is_same_v<Net, GOW17>, "add the network's settings to SettingsOf");
+    return s.gow17;
+  }
 }
 
 template <class Pair>

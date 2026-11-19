@@ -17,6 +17,7 @@
 #include <tuple>
 #include <utility>
 
+#include "chemistry2/network/gow17.hpp"
 #include "chemistry2/network/h2.hpp"
 #include "chemistry2/solvers/semi_implicit.hpp"
 
@@ -28,7 +29,7 @@ struct Pair {
   using Integrator = Solver<Net>;
 };
 
-using Pairs = std::tuple<Pair<H2, SemiImplicit>>;
+using Pairs = std::tuple<Pair<H2, SemiImplicit>, Pair<GOW17, SemiImplicit>>;
 
 constexpr int NUM_PAIRS = static_cast<int>(std::tuple_size_v<Pairs>);
 

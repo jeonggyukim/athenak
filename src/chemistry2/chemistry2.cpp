@@ -65,7 +65,8 @@ Chemistry2::Chemistry2(MeshBlockPack *ppack, ParameterInput *pin)
       active_(FindPair(pin)),
       units_(ReadUnits(ppack, pin, mu_h_)),
       semi_implicit_(SemiImplicitSettings::Read(pin, "chemistry2")),
-      networks_{H2::ReadSettings(pin, "chemistry2")},
+      networks_{H2::ReadSettings(pin, "chemistry2"),
+                GOW17::ReadSettings(pin, "chemistry2")},
       inputs_(InputSource::Read(pin, "chemistry2")) {
   if (pin->DoesBlockExist("chemistry")) {
     Fatal("<chemistry> and <chemistry2> cannot both be used");
