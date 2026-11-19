@@ -48,6 +48,19 @@ KOKKOS_INLINE_FUNCTION Real CoolingH2Moseley(const Real x_h2, const Real x_hi,
   return x_h2*(f1 + f2 + f3 + f4);
 }
 
+//! Nebular metal-line cooling of photoionized gas (Kim et al. 2023), scaled by Z_g
+KOKKOS_INLINE_FUNCTION Real CoolingNebular(const Real x_e, const Real x_hii,
+                                           const Real n_h, const Real T, const Real zg) {
+  constexpr Real A[7] = {-0.0050817, 0.00765822, 0.11832144, -0.50515842, 0.81569592,
+                         -0.58648172, 0.69170381};
+  const Real l = Kokkos::log(T*1e-4);
+  const Real poly = Kokkos::pow(10.0, (((((A[0]*l + A[1])*l + A[2])*l + A[3])*l +
+                                        A[4])*l + A[5])*l + A[6]);
+  const Real f_red = 1.0/(1.0 + 0.12*Kokkos::pow(x_e*n_h*1e-2, 0.38 - 0.12*l));
+  return 3.677602203699553e-21*zg*x_hii*x_e*n_h/Kokkos::sqrt(T)*
+         Kokkos::exp(-38585.52/T)*poly*f_red;
+}
+
 }  // namespace ncr_terms
 }  // namespace chemistry2
 

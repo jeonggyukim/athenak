@@ -7,7 +7,8 @@
 //! \brief NCR rates and closures against Tigris photchem on 500 random states
 //!        (data/tigris_ncr_states.txt, written by data/dump_tigris_ncr.cpp): C and D of
 //!        H2 and H+, x_e after the update and x_C+ to 1e-10 relative, x_CO to 1e-10 of
-//!        2 x_H2 x_C,tot.
+//!        2 x_H2 x_C,tot; heating to 2e-4 and cooling to 2e-2, with the cooling also
+//!        reported by Tigris's groups (H I, H II, H2, other).
 
 #include <algorithm>
 #include <cmath>
@@ -94,7 +95,8 @@ int main(int argc, char *argv[]) {
                          Th::CoolingOI(s.x_oi, nn_hi, nn_h2, nn_e, T) +
                          (s.x_co > 0 ? Th::CoolingCOR(s.x_co, nn_hi, nn_h2, nn_e, T,
                                                       n_h*s.x_co/(vth/3.086e20)) : 0.0) +
-                         Th::CoolingRec(1.0, T, nn_e, g);
+                         Th::CoolingRec(1.0, T, nn_e, g) +
+                         chemistry2::ncr_terms::CoolingNebular(x_e, x_hii, n_h, T, 1.0);
       const Real got_g[4] = {g_hi, g_hii, g_h2, g_oth};
       for (int k = 0; k < 4; ++k) {
         if (grp_ref[k] > 1e-3*cool_ref) grp[k].push_back(Rel(got_g[k], grp_ref[k]));
@@ -127,5 +129,9 @@ int main(int argc, char *argv[]) {
   for (int k = 0; k < 7; ++k) {
     report.ExpectNear(worst[k], 0.0, 0.0, 1e-10, std::string(names[k]) + " vs Tigris");
   }
+  // measured 1.1e-4 (heating; eV 1.602e-12 vs 1.60218e-12 erg) and 1.26e-2 (cooling,
+  // O I and C I rate differences), 2026-11-20
+  report.ExpectNear(hc_err[0][2], 0.0, 0.0, 2e-4, "heating vs Tigris NCR, worst state");
+  report.ExpectNear(hc_err[1][2], 0.0, 0.0, 2e-2, "cooling vs Tigris NCR, worst state");
   return report.ExitCode();
 }

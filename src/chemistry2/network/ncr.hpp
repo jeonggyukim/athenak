@@ -383,6 +383,9 @@ struct NCR {
       cooling += ncr_terms::CoolingH2Moseley(x_h2, x_hi, n_h, T);
     }
     cooling += ncr_terms::CoolingHII(x_e, y[IH_PLUS], n_h, T, ncr::AlphaBHII(T));
+    if (T < c.s.temp_hot1) {
+      cooling += ncr_terms::CoolingNebular(x_e, y[IH_PLUS], n_h, T, c.s.zg);
+    }
     cooling += Thermo::CoolingRec(c.s.zd, T, n_e, c.chi);
     cooling += Thermo::CoolingH2diss(x_hi, x_h2, sub.k_h2_h*n_h, sub.k_h2_h2*n_h);
     cooling += Thermo::CoolingHIion(x_hi, x_e, sub.k_coll_hi*n_h);
