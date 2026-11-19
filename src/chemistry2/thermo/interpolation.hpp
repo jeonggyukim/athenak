@@ -65,7 +65,7 @@ KOKKOS_INLINE_FUNCTION auto LinearInterp(const Real x0, const Real x1, const Y y
 
 // The CO tables are static constexpr class members. Under CUDA they are passed by value,
 // so device code does not reference the host copy; elsewhere by reference, since the
-// copy costs ~10% of the GOW17 kernel on CPU.
+// CPU compiler copies them on every call.
 #if defined(KOKKOS_ENABLE_CUDA)
 template <std::size_t N>
 using TableArg = const Kokkos::Array<Real, N>;
