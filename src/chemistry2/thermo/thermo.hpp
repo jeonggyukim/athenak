@@ -18,6 +18,7 @@
 //!   src/chemistry/thermo/thermo.hpp.
 
 #include "athena.hpp"
+#include "chemistry2/rates/dual.hpp"
 #include "chemistry2/thermo/interpolation.hpp"
 #include "units/units.hpp"
 
@@ -46,50 +47,60 @@ class Thermo {
   // may not.
   //
   // Each is built from the temperature, e.g. OIRateCoefficients(T); the constructors
-  // are defined after the class, from the Compute* functions below.
+  // are defined after the class, from the Compute* functions below. Each is a template
+  // on the scalar S (Real, or dual::Dual for the energy derivative); the (Real T)
+  // constructor exists for S = Real only.
   /// Collisional de-excitation rate coefficients of C II [cm^3 s^-1]
-  struct CIIRateCoefficients {
-    Real k10e, k10HI, k10H2;
-    CIIRateCoefficients() = default;
-    KOKKOS_INLINE_FUNCTION explicit CIIRateCoefficients(Real T);
+  template <class S>
+  struct CIIRateCoefficientsT {
+    S k10e, k10HI, k10H2;
+    CIIRateCoefficientsT() = default;
+    KOKKOS_INLINE_FUNCTION explicit CIIRateCoefficientsT(Real T);
   };
   /// Collisional de-excitation rate coefficients of C I [cm^3 s^-1]
-  struct CIRateCoefficients {
-    Real k10HI, k20HI, k21HI;
-    Real k10H2, k20H2, k21H2;
-    Real k10e, k20e, k21e;
-    CIRateCoefficients() = default;
-    KOKKOS_INLINE_FUNCTION explicit CIRateCoefficients(Real T);
+  template <class S>
+  struct CIRateCoefficientsT {
+    S k10HI, k20HI, k21HI;
+    S k10H2, k20H2, k21H2;
+    S k10e, k20e, k21e;
+    CIRateCoefficientsT() = default;
+    KOKKOS_INLINE_FUNCTION explicit CIRateCoefficientsT(Real T);
   };
   /// Collisional de-excitation rate coefficients of O I [cm^3 s^-1]
-  struct OIRateCoefficients {
-    Real k10HI, k20HI, k21HI;
-    Real k10H2, k20H2, k21H2;
-    Real k10e, k20e, k21e;
-    OIRateCoefficients() = default;
-    KOKKOS_INLINE_FUNCTION explicit OIRateCoefficients(Real T);
+  template <class S>
+  struct OIRateCoefficientsT {
+    S k10HI, k20HI, k21HI;
+    S k10H2, k20H2, k21H2;
+    S k10e, k20e, k21e;
+    OIRateCoefficientsT() = default;
+    KOKKOS_INLINE_FUNCTION explicit OIRateCoefficientsT(Real T);
   };
   /// Effective rate coefficients of H2 collisions with H I and H2 that set the H2
   /// critical density (Visser et al. 2018) [cm^3 s^-1]
-  struct H2GeffRateCoefficients {
-    Real geff_H, geff_H2;
-    H2GeffRateCoefficients() = default;
-    KOKKOS_INLINE_FUNCTION H2GeffRateCoefficients(Real h, Real h2)
-        : geff_H(h), geff_H2(h2) {}
-    KOKKOS_INLINE_FUNCTION explicit H2GeffRateCoefficients(Real T);
+  template <class S>
+  struct H2GeffRateCoefficientsT {
+    S geff_H, geff_H2;
+    H2GeffRateCoefficientsT() = default;
+    KOKKOS_INLINE_FUNCTION H2GeffRateCoefficientsT(S h, S h2) : geff_H(h), geff_H2(h2) {}
+    KOKKOS_INLINE_FUNCTION explicit H2GeffRateCoefficientsT(Real T);
   };
   /// Low-density cooling coefficients per collision partner, and the LTE rate.
   /// The temperature cutoffs of CoolingH2 are folded in: below Tmin_H2 every
   /// coefficient is zero, above Tmax_H2 they hold their Tmax_H2 values.
-  struct H2CoolingCoefficients {
-    Real LHI, LH2, LHe, LHplus, Le;
-    Real LTE;
-    H2CoolingCoefficients() = default;
-    KOKKOS_INLINE_FUNCTION H2CoolingCoefficients(Real hi, Real h2, Real he, Real hp,
-                                                 Real e, Real lte)
+  template <class S>
+  struct H2CoolingCoefficientsT {
+    S LHI, LH2, LHe, LHplus, Le;
+    S LTE;
+    H2CoolingCoefficientsT() = default;
+    KOKKOS_INLINE_FUNCTION H2CoolingCoefficientsT(S hi, S h2, S he, S hp, S e, S lte)
         : LHI(hi), LH2(h2), LHe(he), LHplus(hp), Le(e), LTE(lte) {}
-    KOKKOS_INLINE_FUNCTION explicit H2CoolingCoefficients(Real T);
+    KOKKOS_INLINE_FUNCTION explicit H2CoolingCoefficientsT(Real T);
   };
+  using CIIRateCoefficients = CIIRateCoefficientsT<Real>;
+  using CIRateCoefficients = CIRateCoefficientsT<Real>;
+  using OIRateCoefficients = OIRateCoefficientsT<Real>;
+  using H2GeffRateCoefficients = H2GeffRateCoefficientsT<Real>;
+  using H2CoolingCoefficients = H2CoolingCoefficientsT<Real>;
 
   //-------------------------------------------------------------------------------------
   /*!
@@ -219,17 +230,18 @@ class Thermo {
    * \param ne electron number density in cm^-3.
    * \return Real Photoelectric heating by dust. Heating rate in erg H^-1 s^-1.
    */
-  KOKKOS_INLINE_FUNCTION static Real HeatingPE(const Real G, const Real Zd,
-                                        const Real T, const Real ne) {
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S HeatingPE(const Real G, const Real Zd,
+                                            const S T, const Real ne) {
     const double small_ = 1e-10;
     if (ne < small_) {
-      return 0.;
+      return S(0.);
     }
-    const Real x = 1.7 * G * Kokkos::sqrt(T) / ne + 50.;
-    const Real fac = (CPE_[0] + CPE_[1] * Kokkos::pow(T, CPE_[4])) /
-                     (1. + CPE_[2] * Kokkos::pow(x, CPE_[5]) *
-                               (1. + CPE_[3] * Kokkos::pow(x, CPE_[6])));
-    const Real heating = 1.7e-26 * G * Zd * fac;
+    const S x = (1.7 * G / ne) * dual::sqrt(T) + 50.;
+    const S fac = (CPE_[0] + CPE_[1] * dual::pow(T, CPE_[4])) /
+                  (1. + CPE_[2] * dual::pow(x, CPE_[5]) *
+                            (1. + CPE_[3] * dual::pow(x, CPE_[6])));
+    const S heating = (1.7e-26 * G * Zd) * fac;
     return heating;
   }
 
@@ -249,23 +261,25 @@ class Thermo {
   /*!
    * \brief The H2 critical-density factor both heating terms need.
    */
-  KOKKOS_INLINE_FUNCTION static Real H2CritFactor_(const Real xHI,
-                                                   const Real xH2,
-                                                   const Real nH,
-                                                   const Real k_xH2_photo,
-                                                   const H2GeffRateCoefficients& g) {
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S H2CritFactor_(const Real xHI,
+                                                const Real xH2,
+                                                const Real nH,
+                                                const Real k_xH2_photo,
+                                                const H2GeffRateCoefficientsT<S>& g) {
     const Real A = 2.0e-7;
-    const Real ncr =
+    const S ncr =
         (A + k_xH2_photo) / (g.geff_H * xHI + g.geff_H2 * xH2);
     return 1. / (1. + ncr / nH);
   }
 
-  KOKKOS_INLINE_FUNCTION static Real HeatingH2grFrom(const Real xHI, const Real xH2,
-                                              const Real nH, const Real kgr,
-                                              const Real k_xH2_photo,
-                                              const H2GeffRateCoefficients& g) {
-    const Real f = H2CritFactor_(xHI, xH2, nH, k_xH2_photo, g);
-    return kgr * xHI * (0.2 + 4.2 * f) * eV_;
+  template <class S, class K>
+  KOKKOS_INLINE_FUNCTION static auto HeatingH2grFrom(const Real xHI, const Real xH2,
+                                                     const Real nH, const K kgr,
+                                                  const Real k_xH2_photo,
+                                                  const H2GeffRateCoefficientsT<S>& g) {
+    const S f = H2CritFactor_(xHI, xH2, nH, k_xH2_photo, g);
+    return kgr * (xHI * eV_) * (0.2 + 4.2 * f);
   }
 
   KOKKOS_INLINE_FUNCTION static Real HeatingH2gr(const Real xHI, const Real xH2,
@@ -290,11 +304,12 @@ class Thermo {
    * in RHS in NL99p.
    * \return Real Heating rate by H2 UV pumping in erg H^-1 s^-1.
    */
-  KOKKOS_INLINE_FUNCTION static Real HeatingH2pumpFrom(const Real xHI, const Real xH2,
-                                                const Real nH,
-                                                const Real k_xH2_photo,
-                                                const H2GeffRateCoefficients& g) {
-    const Real f = H2CritFactor_(xHI, xH2, nH, k_xH2_photo, g);
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S HeatingH2pumpFrom(const Real xHI, const Real xH2,
+                                                    const Real nH,
+                                                    const Real k_xH2_photo,
+                                                    const H2GeffRateCoefficientsT<S>& g) {
+    const S f = H2CritFactor_(xHI, xH2, nH, k_xH2_photo, g);
     return k_xH2_photo * 8. * 2.0 * f * eV_ * xH2;
   }
 
@@ -333,12 +348,13 @@ class Thermo {
   /*!
    * \brief CII cooling from coefficients supplied by the caller.
    */
-  KOKKOS_INLINE_FUNCTION static Real CoolingCIIFrom(const Real xCII, const Real nHI,
-                                             const Real nH2, const Real ne,
-                                             const CIIRateCoefficients& k,
-                                             const Real boltz) {
-    const Real q10 = q10CIIFrom(nHI, nH2, ne, k);
-    const Real q01 = (g1CII_ / g0CII_) * q10 * boltz;
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S CoolingCIIFrom(const Real xCII, const Real nHI,
+                                                 const Real nH2, const Real ne,
+                                                 const CIIRateCoefficientsT<S>& k,
+                                                 const S boltz) {
+    const S q10 = q10CIIFrom(nHI, nH2, ne, k);
+    const S q01 = (g1CII_ / g0CII_) * q10 * boltz;
     return Cooling2Level_(q01, q10, A10CII_, E10CII_, xCII);
   }
 
@@ -419,16 +435,17 @@ class Thermo {
   /*!
    * \brief CI cooling from coefficients supplied by the caller.
    */
-  KOKKOS_INLINE_FUNCTION static Real CoolingCIFrom(const Real xCI, const Real nHI,
-                                            const Real nH2, const Real ne,
-                                            const CIRateCoefficients& k, const Real b10,
-                                            const Real b20, const Real b21) {
-    const Real q10 = k.k10HI * nHI + k.k10H2 * nH2 + k.k10e * ne;
-    const Real q20 = k.k20HI * nHI + k.k20H2 * nH2 + k.k20e * ne;
-    const Real q21 = k.k21HI * nHI + k.k21H2 * nH2 + k.k21e * ne;
-    const Real q01 = (g1CI_ / g0CI_) * q10 * b10;
-    const Real q02 = (g2CI_ / g0CI_) * q20 * b20;
-    const Real q12 = (g2CI_ / g1CI_) * q21 * b21;
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S CoolingCIFrom(const Real xCI, const Real nHI,
+                                                const Real nH2, const Real ne,
+                                                const CIRateCoefficientsT<S>& k,
+                                                const S b10, const S b20, const S b21) {
+    const S q10 = k.k10HI * nHI + k.k10H2 * nH2 + k.k10e * ne;
+    const S q20 = k.k20HI * nHI + k.k20H2 * nH2 + k.k20e * ne;
+    const S q21 = k.k21HI * nHI + k.k21H2 * nH2 + k.k21e * ne;
+    const S q01 = (g1CI_ / g0CI_) * q10 * b10;
+    const S q02 = (g2CI_ / g0CI_) * q20 * b20;
+    const S q12 = (g2CI_ / g1CI_) * q21 * b21;
     return Cooling3Level_(q01, q10, q02, q20, q12, q21, A10CI_, A20CI_, A21CI_,
                           E10CI_, E20CI_, E21CI_, xCI);
   }
@@ -509,16 +526,17 @@ class Thermo {
    * \details Linear in the collider densities and free of transcendentals. The
    * Boltzmann factors are passed in because they too depend only on T.
    */
-  KOKKOS_INLINE_FUNCTION static Real CoolingOIFrom(const Real xOI, const Real nHI,
-                                            const Real nH2, const Real ne,
-                                            const OIRateCoefficients& k, const Real b10,
-                                            const Real b20, const Real b21) {
-    const Real q10 = k.k10HI * nHI + k.k10H2 * nH2 + k.k10e * ne;
-    const Real q20 = k.k20HI * nHI + k.k20H2 * nH2 + k.k20e * ne;
-    const Real q21 = k.k21HI * nHI + k.k21H2 * nH2 + k.k21e * ne;
-    const Real q01 = (g1OI_ / g0OI_) * q10 * b10;
-    const Real q02 = (g2OI_ / g0OI_) * q20 * b20;
-    const Real q12 = (g2OI_ / g1OI_) * q21 * b21;
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S CoolingOIFrom(const Real xOI, const Real nHI,
+                                                const Real nH2, const Real ne,
+                                                const OIRateCoefficientsT<S>& k,
+                                                const S b10, const S b20, const S b21) {
+    const S q10 = k.k10HI * nHI + k.k10H2 * nH2 + k.k10e * ne;
+    const S q20 = k.k20HI * nHI + k.k20H2 * nH2 + k.k20e * ne;
+    const S q21 = k.k21HI * nHI + k.k21H2 * nH2 + k.k21e * ne;
+    const S q01 = (g1OI_ / g0OI_) * q10 * b10;
+    const S q02 = (g2OI_ / g0OI_) * q20 * b20;
+    const S q12 = (g2OI_ / g1OI_) * q21 * b21;
 
     return Cooling3Level_(q01, q10, q02, q20, q12, q21, A10OI_, A20OI_, A21OI_,
                           E10OI_, E20OI_, E21OI_, xOI);
@@ -538,10 +556,11 @@ class Thermo {
    *
    * \details Both fac and k01 depend only on T.
    */
-  KOKKOS_INLINE_FUNCTION static Real CoolingLyaFrom(const Real xHI, const Real ne,
-                                             const Real fac, const Real k01) {
-    const Real q01 = k01 * ne;
-    const Real q10 = (g0HI_ / g1HI_) * fac * ne;
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S CoolingLyaFrom(const Real xHI, const Real ne,
+                                                 const S fac, const S k01) {
+    const S q01 = k01 * ne;
+    const S q10 = (g0HI_ / g1HI_) * fac * ne;
     return Cooling2Level_(q01, q10, A10HI_, E10HI_, xHI);
   }
 
@@ -566,48 +585,50 @@ class Thermo {
    * \param NCOeff effective column density of CO using LVG approximation.
    * \return Real Cooling rate for CO rotational lines in erg H^-1 s^-1
    */
-  KOKKOS_INLINE_FUNCTION static Real CoolingCOR(const Real xCO, const Real nHI,
-                                         const Real nH2, const Real ne, Real T,
-                                         const Real NCOeff) {
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S CoolingCOR(const Real xCO, const Real nHI,
+                                             const Real nH2, const Real ne, S T,
+                                             const S NCOeff) {
     // effective number density of colliders
     // TODO(Gong): potentially can use despotic to generate a more accurate
     // value for interpolation, might be faster too
     const Real Tmax_CO = 2000.;  // maximum temperature above which use Tmax
-    T = Kokkos::fmin(T, Tmax_CO);
+    T = dual::fmin(T, Tmax_CO);
 
     // factor to make the cooling rate goes to zero at T=0.
-    const Real facT = Kokkos::pow(1. - Kokkos::exp(-T), 1.0e3);
+    const S facT = dual::pow(1. - dual::exp(-T), 1.0e3);
     // small number for a very small NCOeff
     const Real eps = 1.0e13;
-    const Real log_NCOeff =
-        Kokkos::log10(NCOeff * 1.0e5 + eps);  // unit: cm^-2 / (km/s)
-    const Real Troot4 = Kokkos::pow(T, 0.25);
-    const Real neff = nH2 + 1.75 * Troot4 * nHI + 680.1 / Troot4 * ne;
+    const S log_NCOeff =
+        dual::log10(NCOeff * 1.0e5 + eps);  // unit: cm^-2 / (km/s)
+    const S Troot4 = dual::pow(T, 0.25);
+    const S neff = nH2 + (1.75 * nHI) * Troot4 + (680.1 * ne) / Troot4;
     // interpolate parameters using given T and NCOeff
     // index of T and Neff
     const int iT0 = static_cast<int>(
-        interpolation::LinearInterpIndex(lenTCO_, TCO_, T));
+        interpolation::LinearInterpIndex(lenTCO_, TCO_, dual::Value(T)));
     const int iNeff0 = static_cast<int>(interpolation::LinearInterpIndex(
-        lenNeffCO_, NeffCO_, log_NCOeff));
+        lenNeffCO_, NeffCO_, dual::Value(log_NCOeff)));
     // L0
-    const Real log_L0 = -interpolation::LP1Di(TCO_, L0CO_, iT0, T);
-    const Real L0 = Kokkos::pow(10, log_L0);
+    const S log_L0 = -interpolation::LP1Di(TCO_, L0CO_, iT0, T);
+    const S L0 = dual::pow(10., log_L0);
     // LLTE
-    const Real log_LLTE = -interpolation::LP2Di(
+    const S log_LLTE = -interpolation::LP2Di(
         TCO_, NeffCO_, lenTCO_, iT0, iNeff0, LLTECO_, T, log_NCOeff);
-    const Real LLTE = Kokkos::pow(10, log_LLTE);
+    const S LLTE = dual::pow(10., log_LLTE);
     // n1/2
-    const Real log_nhalf = interpolation::LP2Di(
+    const S log_nhalf = interpolation::LP2Di(
         TCO_, NeffCO_, lenTCO_, iT0, iNeff0, nhalfCO_, T, log_NCOeff);
-    const Real nhalf = Kokkos::pow(10, log_nhalf);
+    const S nhalf = dual::pow(10., log_nhalf);
     // alpha
-    const Real alpha = interpolation::LP2Di(
+    const S alpha = interpolation::LP2Di(
         TCO_, NeffCO_, lenTCO_, iT0, iNeff0, alphaCO_, T, log_NCOeff);
-    const Real inv_LCO =
-        1. / L0 + neff / LLTE +
-        1. / L0 * Kokkos::pow(neff / nhalf, alpha) * (1. - nhalf * L0 / LLTE);
+    const S inv_L0 = 1. / L0;
+    const S inv_LCO =
+        inv_L0 + neff / LLTE +
+        inv_L0 * dual::pow(neff / nhalf, alpha) * (1. - nhalf * L0 / LLTE);
 
-    return (1. / inv_LCO) * neff * xCO * facT;
+    return neff * (xCO * facT) / inv_LCO;
   }
 
   //-------------------------------------------------------------------------------------
@@ -643,14 +664,15 @@ class Thermo {
    * LTE rate does not involve them at all, so every temperature dependence sits
    * in \p k and this step is pure arithmetic.
    */
-  KOKKOS_INLINE_FUNCTION static Real CoolingH2From(const Real xH2, const Real nHI,
-                                            const Real nH2, const Real nHe,
-                                            const Real nHplus, const Real ne,
-                                            const H2CoolingCoefficients& k) {
-    const Real Gamma_n0 = k.LHI * nHI + k.LH2 * nH2 + k.LHe * nHe +
-                          k.LHplus * nHplus + k.Le * ne;
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S CoolingH2From(const Real xH2, const Real nHI,
+                                                const Real nH2, const Real nHe,
+                                                const Real nHplus, const Real ne,
+                                                const H2CoolingCoefficientsT<S>& k) {
+    const S Gamma_n0 = k.LHI * nHI + k.LH2 * nH2 + k.LHe * nHe +
+                       k.LHplus * nHplus + k.Le * ne;
     if (Gamma_n0 <= 1e-100) {
-      return 0.0;
+      return S(0.0);
     }
     return (k.LTE / (1.0 + k.LTE / Gamma_n0)) * xH2;
   }
@@ -757,13 +779,14 @@ class Thermo {
    * extinction. G=G0 * exp(-NH*sigmaPE_) at one line of sight.
    * \return Real Cooling rate for  recombination of e on PAHs in erg H^-1 s^-1
    */
-  KOKKOS_INLINE_FUNCTION static Real CoolingRec(const Real Zd, const Real T,
-                                         const Real ne, const Real G) {
-    const Real x = 1.7 * G * Kokkos::sqrt(T) / (ne + 1e-50) + 50.;
-    const Real lnx = Kokkos::log(x);
-    const Real cooling = 1.0e-28 * ne *
-                         Kokkos::pow(T, DPE_[0] + DPE_[1] / lnx) *
-                         Kokkos::exp(DPE_[2] + (DPE_[3] - DPE_[4] * lnx) * lnx);
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S CoolingRec(const Real Zd, const S T,
+                                             const Real ne, const Real G) {
+    const S x = (1.7 * G / (ne + 1e-50)) * dual::sqrt(T) + 50.;
+    const S lnx = dual::log(x);
+    const S cooling = (1.0e-28 * ne) *
+                      dual::pow(T, DPE_[0] + DPE_[1] / lnx) *
+                      dual::exp(DPE_[2] + (DPE_[3] - DPE_[4] * lnx) * lnx);
     return cooling * Zd;
   }
 
@@ -780,12 +803,11 @@ class Thermo {
    * \param k_H2_H2 reaction rate coefficients (k2body_ in NL99p)
    * \return Real Cooling rate for H2 collisional dissociation in erg H^-1 s^-1.
    */
-  KOKKOS_INLINE_FUNCTION static Real CoolingH2diss(const Real xHI, const Real xH2,
-                                            const Real k_H2_H,
-                                            const Real k_H2_H2) {
-    const Real rate15 = k_H2_H * xH2 * xHI;
-    const Real rate16 = k_H2_H2 * xH2 * xH2;
-    return 4.48 * eV_ * (rate15 + rate16);
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S CoolingH2diss(const Real xHI, const Real xH2,
+                                                const S k_H2_H,
+                                                const S k_H2_H2) {
+    return (4.48 * eV_ * xH2) * (k_H2_H * xHI + k_H2_H2 * xH2);
   }
 
   //-------------------------------------------------------------------------------------
@@ -800,10 +822,10 @@ class Thermo {
    * \return Real Cooling rate for collisional ionization of HI in erg H^-1
    * s^-1.
    */
-  KOKKOS_INLINE_FUNCTION static Real CoolingHIion(const Real xHI, const Real xe,
-                                           const Real k_H_e) {
-    const Real rate = k_H_e * xHI * xe;
-    return 13.6 * eV_ * rate;
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S CoolingHIion(const Real xHI, const Real xe,
+                                               const S k_H_e) {
+    return k_H_e * (13.6 * eV_ * xHI * xe);
   }
 
  private:
@@ -844,9 +866,10 @@ class Thermo {
     return k;
   }
 
-  KOKKOS_INLINE_FUNCTION static Real q10CIIFrom(const Real nHI, const Real nH2,
-                                                const Real ne,
-                                                const CIIRateCoefficients& k) {
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S q10CIIFrom(const Real nHI, const Real nH2,
+                                             const Real ne,
+                                             const CIIRateCoefficientsT<S>& k) {
     return k.k10e * ne + k.k10HI * nHI + k.k10H2 * nH2;
   }
 
@@ -871,11 +894,12 @@ class Thermo {
    * \param xs ns/nH, abundances of species s.
    * \return Real Line cooling rate in erg H^-1 s^-1.
    */
-  KOKKOS_INLINE_FUNCTION static Real Cooling2Level_(const Real q01, const Real q10,
-                                             const Real A10, const Real E10,
-                                             const Real xs) {
-    const Real f1 = q01 / (q01 + q10 + A10);
-    return f1 * A10 * E10 * xs;
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S Cooling2Level_(const S q01, const S q10,
+                                                 const Real A10, const Real E10,
+                                                 const Real xs) {
+    const S f1 = q01 / (q01 + q10 + A10);
+    return f1 * (A10 * E10 * xs);
   }
 
   //-------------------------------------------------------------------------------------
@@ -891,23 +915,22 @@ class Thermo {
    * \param xs ns/nH, abundances of species s.
    * \return Real Total line cooling rate in erg H^-1 s^-1.
    */
-  KOKKOS_INLINE_FUNCTION static Real Cooling3Level_(const Real q01, const Real q10,
-                                             const Real q02, const Real q20,
-                                             const Real q12, const Real q21,
-                                             const Real A10, const Real A20,
-                                             const Real A21, const Real E10,
-                                             const Real E20, const Real E21,
-                                             const Real xs) {
-    const Real R10 = q10 + A10;
-    const Real R20 = q20 + A20;
-    const Real R21 = q21 + A21;
-    const Real a0 = R10 * R20 + R10 * R21 + q12 * R20;
-    const Real a1 = q01 * R20 + q01 * R21 + R21 * q02;
-    const Real a2 = q02 * R10 + q02 * q12 + q12 * q01;
-    const Real de = a0 + a1 + a2;
-    const Real f1 = a1 / de;
-    const Real f2 = a2 / de;
-    return (f1 * A10 * E10 + f2 * (A20 * E20 + A21 * E21)) * xs;
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static S Cooling3Level_(const S q01, const S q10,
+                                                 const S q02, const S q20,
+                                                 const S q12, const S q21,
+                                                 const Real A10, const Real A20,
+                                                 const Real A21, const Real E10,
+                                                 const Real E20, const Real E21,
+                                                 const Real xs) {
+    const S R10 = q10 + A10;
+    const S R20 = q20 + A20;
+    const S R21 = q21 + A21;
+    const S a0 = R10 * R20 + R10 * R21 + q12 * R20;
+    const S a1 = q01 * R20 + q01 * R21 + R21 * q02;
+    const S a2 = q02 * R10 + q02 * q12 + q12 * q01;
+    const S inv_de = 1.0 / (a0 + a1 + a2);
+    return (a1 * (A10 * E10) + a2 * (A20 * E20 + A21 * E21)) * (inv_de * xs);
   }
 
   //-------------------------------------------------------------------------------------
@@ -1114,16 +1137,21 @@ class Thermo {
                                                   0.05089};
 };
 
-KOKKOS_INLINE_FUNCTION Thermo::CIIRateCoefficients::CIIRateCoefficients(const Real T)
-    : CIIRateCoefficients(Thermo::ComputeCII(T)) {}
-KOKKOS_INLINE_FUNCTION Thermo::CIRateCoefficients::CIRateCoefficients(const Real T)
-    : CIRateCoefficients(Thermo::ComputeCI(T)) {}
-KOKKOS_INLINE_FUNCTION Thermo::OIRateCoefficients::OIRateCoefficients(const Real T)
-    : OIRateCoefficients(Thermo::ComputeOI(T)) {}
-KOKKOS_INLINE_FUNCTION Thermo::H2GeffRateCoefficients::H2GeffRateCoefficients(
-    const Real T) : H2GeffRateCoefficients(Thermo::ComputeH2Geff(T)) {}
-KOKKOS_INLINE_FUNCTION Thermo::H2CoolingCoefficients::H2CoolingCoefficients(
-    const Real T) : H2CoolingCoefficients(Thermo::ComputeH2Cooling(T)) {}
+template <class S>
+KOKKOS_INLINE_FUNCTION Thermo::CIIRateCoefficientsT<S>::CIIRateCoefficientsT(const Real T)
+    : CIIRateCoefficientsT(Thermo::ComputeCII(T)) {}
+template <class S>
+KOKKOS_INLINE_FUNCTION Thermo::CIRateCoefficientsT<S>::CIRateCoefficientsT(const Real T)
+    : CIRateCoefficientsT(Thermo::ComputeCI(T)) {}
+template <class S>
+KOKKOS_INLINE_FUNCTION Thermo::OIRateCoefficientsT<S>::OIRateCoefficientsT(const Real T)
+    : OIRateCoefficientsT(Thermo::ComputeOI(T)) {}
+template <class S>
+KOKKOS_INLINE_FUNCTION Thermo::H2GeffRateCoefficientsT<S>::H2GeffRateCoefficientsT(
+    const Real T) : H2GeffRateCoefficientsT(Thermo::ComputeH2Geff(T)) {}
+template <class S>
+KOKKOS_INLINE_FUNCTION Thermo::H2CoolingCoefficientsT<S>::H2CoolingCoefficientsT(
+    const Real T) : H2CoolingCoefficientsT(Thermo::ComputeH2Cooling(T)) {}
 
 }  // namespace chemistry2
 

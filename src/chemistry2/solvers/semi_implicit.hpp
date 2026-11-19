@@ -75,8 +75,14 @@ class SemiImplicit {
       e = Kokkos::fmax(e, 0.0);
 
       Substep sub = Network::Prepare(y, e, cell);
-      const Real edot = Network::Edot(y, e, cell, sub);
-      const Real dedot_de = EnergyDerivative(y, e, cell, sub, edot);
+      Real edot, dedot_de;
+      if constexpr (HasEdotDerivative<Network>::value) {
+        edot = Network::EdotWithDerivative(y, e, cell, sub, &dedot_de);
+        dedot_de = Kokkos::fmin(dedot_de, 0.0);
+      } else {
+        edot = Network::Edot(y, e, cell, sub);
+        dedot_de = EnergyDerivative(y, e, cell, sub, edot);
+      }
       const Real t_left = t_end - t_now;
       const Real h = (n >= s.nsub_max - 1)
                          ? t_left
@@ -160,6 +166,15 @@ class SemiImplicit {
       : std::bool_constant<N::template CUSTOM_UPDATE<K>> {};
   template <class N, int K>
   static constexpr bool HasCustomUpdate() { return CustomUpdateTrait<N, K>::value; }
+
+  //! A network that sets `static constexpr bool EDOT_DERIVATIVE = true` supplies
+  //! EdotWithDerivative(y, e, cell, sub, &dedot_de): edot, and d(edot)/de at fixed
+  //! species, from one evaluation
+  template <class N, class = void>
+  struct HasEdotDerivative : std::false_type {};
+  template <class N>
+  struct HasEdotDerivative<N, std::void_t<decltype(N::EDOT_DERIVATIVE)>>
+      : std::bool_constant<N::EDOT_DERIVATIVE> {};
 };
 
 }  // namespace chemistry2
