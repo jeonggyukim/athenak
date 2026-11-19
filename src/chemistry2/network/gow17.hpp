@@ -23,6 +23,7 @@
 #include "parameter_input.hpp"
 #include "chemistry2/inputs/cell_inputs.hpp"
 #include "chemistry2/network/gow17_rates.hpp"
+#include "chemistry2/network/gow17_table.hpp"
 #include "chemistry2/network/network_config.hpp"
 #include "chemistry2/network/species_table.hpp"
 #include "chemistry2/thermo/thermo.hpp"
@@ -31,8 +32,11 @@
 
 namespace chemistry2 {
 
-struct GOW17 {
-  static constexpr std::string_view NAME = "GOW17";  // <chemistry2>/network
+//! TABLE: temperature-only coefficients from the rate table (the default, "GOW17"), or
+//! from the analytic fits ("GOW17_analytic", for comparisons with src/chemistry)
+template <bool TABLE>
+struct GOW17Network {
+  static constexpr std::string_view NAME = TABLE ? "GOW17" : "GOW17_analytic";
   static constexpr std::array<SpeciesRow, 12> rows = {
       Species("He+").Charge(1).He(1),
       Species("OHx").H(1).O(1),
@@ -51,7 +55,7 @@ struct GOW17 {
   static constexpr int HYDROGEN_REMAINDER_CHARGE = 0;
   enum : int {IHE_PLUS, IOHX, ICHX, ICO, IC_PLUS, IHCO_PLUS, IH2, IH_PLUS, IH3_PLUS,
               IH2_PLUS, IO_PLUS, ISI_PLUS};
-  static constexpr int NSPEC = NumSpecies<GOW17>();
+  static constexpr int NSPEC = NumSpecies<GOW17Network>();
   static_assert(SpeciesIndex(rows, "HCO+") == IHCO_PLUS);
   static_assert(SpeciesIndex(rows, "Si+") == ISI_PLUS);
 
@@ -68,9 +72,16 @@ struct GOW17 {
     Real leff_co_max;     // maximum effective length for CO cooling [cm]
     bool h2_rovib_cooling;
     bool kgr_h2_const;
+    RowTable table;       // temperature-only coefficients (TABLE only)
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
+    Settings s = ReadValues(pin, b);
+    if constexpr (TABLE) s.table = gow17::BuildGOW17Table(s.kgr_h2_const);
+    return s;
+  }
+
+  static Settings ReadValues(ParameterInput *pin, const std::string &b) {
     const Real inf = Kokkos::Experimental::infinity_v<Real>;
     const Real zg = pin->GetOrAddReal(b, "GOW17_Z_g", 1.0);
     return Settings{pin->GetOrAddReal(b, "GOW17_Z_d", 1.0),
@@ -85,7 +96,8 @@ struct GOW17 {
                     pin->GetOrAddReal(b, "GOW17_temperature_max_cooling_nm", 1.0e9),
                     pin->GetOrAddReal(b, "GOW17_Leff_CO_max", 3.0e20),
                     pin->GetOrAddBoolean(b, "GOW17_H2_rovib_cooling", true),
-                    pin->GetOrAddBoolean(b, "is_kgrH2_const", false)};
+                    pin->GetOrAddBoolean(b, "is_kgrH2_const", false),
+                    RowTable()};
   }
 
   //! Constants of one cell over the hydro step
@@ -95,6 +107,7 @@ struct GOW17 {
     Settings s;
     Real g0, xi_cr, grad_v;  // FUV field [Draine], CR rate [s^-1], |grad v| [s^-1]
     Real kph[gow17::N_PH];   // photo rates [s^-1]
+    Real cr_heat_h2;         // heat per cosmic-ray ionization in molecular gas [erg]
   };
 
   KOKKOS_INLINE_FUNCTION static Cell MakeCell(const Real rho, const Real gamma,
@@ -114,6 +127,7 @@ struct GOW17 {
     constexpr Real kph_base[gow17::N_PH] = {3.5e-10, 9.1e-10, 2.4e-10,
                                             3.8e-10, 5.7e-11, 4.5e-9};
     for (int p = 0; p < gow17::N_PH; ++p) c.kph[p] = kph_base[p]*in.g0;
+    c.cr_heat_h2 = Thermo::CRHeatPerH2(c.n_h);
     return c;
   }
 
@@ -125,17 +139,18 @@ struct GOW17 {
   struct Substep {
     Ghosts g;
     Real T;
+    Slot slot;  // table rows of T (TABLE only)
     gow17::GOW17Rates r;
   };
 
   KOKKOS_INLINE_FUNCTION static Ghosts MakeGhosts(const Real *y, const Settings &s) {
     Ghosts g;
-    g.si = ElementBudget<GOW17, ELEM_SI>(y, s.x_si);
-    g.c = ElementBudget<GOW17, ELEM_C>(y, s.x_c);
-    g.o = ElementBudget<GOW17, ELEM_O>(y, s.x_o);
-    g.he = ElementBudget<GOW17, ELEM_HE>(y, s.x_he);
-    g.e = Electrons<GOW17>(y);
-    g.h = ElementBudget<GOW17, ELEM_H>(y, 1.0);
+    g.si = ElementBudget<GOW17Network, ELEM_SI>(y, s.x_si);
+    g.c = ElementBudget<GOW17Network, ELEM_C>(y, s.x_c);
+    g.o = ElementBudget<GOW17Network, ELEM_O>(y, s.x_o);
+    g.he = ElementBudget<GOW17Network, ELEM_HE>(y, s.x_he);
+    g.e = Electrons<GOW17Network>(y);
+    g.h = ElementBudget<GOW17Network, ELEM_H>(y, 1.0);
     return g;
   }
 
@@ -158,22 +173,43 @@ struct GOW17 {
       T = c.s.t_max_rates;
     }
     sub.T = T;
-    const gow17::GOW17TemperatureRates tr(T, T_coll, c.s.kgr_h2_const);
-    sub.r = gow17::MakeGOW17Rates(tr, y[IH2], sub.g.h, sub.g.e, c.n_h, c.s.zd, c.xi_cr,
-                                  c.g0);
+    if constexpr (TABLE) {
+      sub.slot = c.s.table.grid.Locate(T);
+      const gow17::GOW17TemperatureRates tr =
+          gow17::LookupRates(c.s.table, sub.slot, T, T_coll);
+      sub.r = gow17::MakeGOW17Rates(tr, y[IH2], sub.g.h, sub.g.e, c.n_h, c.s.zd,
+                                    c.xi_cr, c.g0);
+    } else {
+      const gow17::GOW17TemperatureRates tr(T, T_coll, c.s.kgr_h2_const);
+      sub.r = gow17::MakeGOW17Rates(tr, y[IH2], sub.g.h, sub.g.e, c.n_h, c.s.zd,
+                                    c.xi_cr, c.g0);
+    }
     return sub;
   }
+
+  //! Heating and cooling rates [erg s^-1 per H]
+  struct HeatCool {
+    Real heating, cooling;
+  };
 
   //! de/dt in code units, with the substep's ghosts and rate coefficients
   KOKKOS_INLINE_FUNCTION static Real Edot(const Real *y, const Real e, const Cell &c,
                                           const Substep &sub) {
+    const HeatCool hc = HeatingCooling(y, e, c, sub);
+    return c.u_time*((hc.heating - hc.cooling)*c.n_h*c.inv_u_energy);
+  }
+
+  KOKKOS_INLINE_FUNCTION static HeatCool HeatingCooling(const Real *y, const Real e,
+                                                        const Cell &c,
+                                                        const Substep &sub) {
     const Ghosts &g = sub.g;
     const gow17::GOW17Rates &r = sub.r;
     Real T = RawTemperature(y, e, g.e, c);
     if (T < c.s.t_min_rates) T = c.s.t_min_rates;
     constexpr Real T_FLOOR = 1.0;
-    if (T < T_FLOOR) return 0.0;
+    if (T < T_FLOOR) return HeatCool{0.0, 0.0};
     const Real n_h = c.n_h;
+    if constexpr (TABLE) return HeatCoolTable(y, T, c, sub);
     // heating
     Real heating = 0.0;
     if (T <= c.s.t_max_heating) {
@@ -208,7 +244,60 @@ struct GOW17 {
                                        r.k2[gow17::I2_H2_H2]);
       cooling += Thermo::CoolingHIion(g.h, g.e, r.k2[gow17::I2_H_E]);
     }
-    return c.u_time*((heating - cooling)*n_h*c.inv_u_energy);
+    return HeatCool{heating, cooling};
+  }
+
+  //! Heating and cooling with the temperature-only coefficients from the table
+  KOKKOS_INLINE_FUNCTION static HeatCool HeatCoolTable(const Real *y, const Real T,
+                                                       const Cell &c,
+                                                       const Substep &sub) {
+    const Ghosts &g = sub.g;
+    const gow17::GOW17Rates &r = sub.r;
+    const RowTable &tab = c.s.table;
+    const Real n_h = c.n_h;
+    const Real T_cap = Kokkos::fmin(T, c.s.t_max_cooling_nm);
+    const Slot s_t = tab.grid.Locate(T);
+    const Slot s_cap = (T_cap == T) ? s_t : tab.grid.Locate(T_cap);
+    Real heating = 0.0;
+    if (T <= c.s.t_max_heating) {
+      const Thermo::H2GeffRateCoefficients geff{tab.At(s_t, gow17::C_H2GEFF),
+                                                tab.At(s_t, gow17::C_H2GEFF + 1)};
+      heating = Thermo::HeatingCRFrom(g.e, g.h, y[IH2], c.xi_cr, c.cr_heat_h2);
+      heating += Thermo::HeatingPE(c.g0, c.s.zd, T, n_h*g.e);
+      const Real k_h2_photo = c.kph[gow17::IPH_H2];
+      heating += Thermo::HeatingH2grFrom(g.h, y[IH2], n_h, r.kgr[gow17::IGR_H2],
+                                         k_h2_photo, geff);
+      heating += Thermo::HeatingH2pumpFrom(g.h, y[IH2], n_h, k_h2_photo, geff);
+      heating += Thermo::HeatingH2diss(k_h2_photo, y[IH2]);
+    }
+    Real cooling = 0.0;
+    if (T >= c.s.t_min_cooling) {
+      const gow17::GOW17ThermoCoefficients k = gow17::LookupThermo(tab, s_cap);
+      const Real n_hi = n_h*g.h, n_h2 = n_h*y[IH2], n_e = n_h*g.e;
+      cooling = Thermo::CoolingCIIFrom(y[IC_PLUS], n_hi, n_h2, n_e, k.cii, k.cii_boltz);
+      if (T_cap <= 1.0e6) {
+        cooling += Thermo::CoolingCIFrom(g.c, n_hi, n_h2, n_e, k.ci, k.ci_boltz[0],
+                                         k.ci_boltz[1], k.ci_boltz[2]);
+      }
+      cooling += Thermo::CoolingOIFrom(g.o, n_hi, n_h2, n_e, k.oi, k.oi_boltz[0],
+                                       k.oi_boltz[1], k.oi_boltz[2]);
+      cooling += Thermo::CoolingLyaFrom(g.h, n_e, tab.At(s_t, gow17::C_LYA),
+                                        tab.At(s_t, gow17::C_LYA + 1));
+      const Real vth = Kokkos::sqrt(2.*units::Units::k_boltzmann_cgs*T_cap/
+                                    units::Units::CO_mass_cgs);
+      const Real grad_eff = Kokkos::fmax(c.grad_v, vth/c.s.leff_co_max);
+      const Real n_co_eff = n_h*y[ICO]/grad_eff;
+      cooling += Thermo::CoolingCOR(y[ICO], n_hi, n_h2, n_e, T_cap, n_co_eff);
+      if (c.s.h2_rovib_cooling) {
+        cooling += Thermo::CoolingH2From(y[IH2], n_hi, n_h2, n_h*g.he, n_h*y[IH_PLUS],
+                                         n_e, k.h2cool);
+      }
+      cooling += Thermo::CoolingRec(c.s.zd, T_cap, n_e, c.g0);
+      cooling += Thermo::CoolingH2diss(g.h, y[IH2], r.k2[gow17::I2_H2_H],
+                                       r.k2[gow17::I2_H2_H2]);
+      cooling += Thermo::CoolingHIion(g.h, g.e, r.k2[gow17::I2_H_E]);
+    }
+    return HeatCool{heating, cooling};
   }
 
   //! Creation c [per H per code time] and destruction d [per code time] of species K
@@ -320,6 +409,9 @@ struct GOW17 {
 
   KOKKOS_INLINE_FUNCTION static void Closures(Real *, const Real *, const Cell &) {}
 };
+
+using GOW17 = GOW17Network<true>;
+using GOW17Analytic = GOW17Network<false>;
 
 }  // namespace chemistry2
 

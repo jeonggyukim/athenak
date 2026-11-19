@@ -107,6 +107,81 @@ inline RowTable BuildGOW17Table(const bool kgr_h2_const,
   });
 }
 
+//! The temperature-only rate coefficients from the table: slot at T, and the
+//! collisional columns at T_coll (equal to T unless the rate temperature is capped)
+KOKKOS_INLINE_FUNCTION GOW17TemperatureRates LookupRates(const RowTable &t,
+                                                         const Slot &s, const Real T,
+                                                         const Real T_coll) {
+  GOW17TemperatureRates r;
+  r.T = T;
+  r.T_coll = T_coll;
+  r.sqrt_T = Kokkos::sqrt(T);
+  r.ln_T = 0.0;  // not used after the table
+  for (int i = 0; i < N_2BODY; ++i) r.k2[i] = t.At(s, C_K2 + i);
+  r.k2[I2_H2_H] = 0.0;
+  r.k2[I2_H2_H2] = 0.0;
+  r.coll_active = T_coll > 7.0e2;
+  const Slot sc = (T_coll == T) ? s : t.grid.Locate(T_coll);
+  r.log10_k9l = t.At(sc, C_LOG10_K9L);
+  r.log10_k9h = t.At(sc, C_LOG10_K9H);
+  r.log10_k10l = t.At(sc, C_LOG10_K10L);
+  r.log10_k10h = t.At(sc, C_LOG10_K10H);
+  r.ncr_h = t.At(sc, C_NCR_H);
+  r.ncr_h2 = t.At(sc, C_NCR_H2);
+  r.k2[I2_H_E] = r.coll_active ? t.At(sc, C_K2 + I2_H_E) : 0.0;
+  r.kgr_h2 = t.At(s, C_KGR_H2);
+  for (int i = 0; i < 4; ++i) {
+    r.gr_tfac[i] = t.At(s, C_GR_TFAC + i);
+    r.gr_texp[i] = t.At(s, C_GR_TEXP + i);
+  }
+  return r;
+}
+
+//! The temperature-only coefficients of the heating and cooling terms
+struct GOW17ThermoCoefficients {
+  Thermo::CIIRateCoefficients cii;
+  Real cii_boltz;
+  Thermo::CIRateCoefficients ci;
+  Real ci_boltz[3];
+  Thermo::OIRateCoefficients oi;
+  Real oi_boltz[3];
+  Thermo::H2GeffRateCoefficients h2geff;
+  Thermo::H2CoolingCoefficients h2cool;
+  Real lya_fac, lya_k01;
+};
+
+KOKKOS_INLINE_FUNCTION GOW17ThermoCoefficients LookupThermo(const RowTable &t,
+                                                            const Slot &s) {
+  GOW17ThermoCoefficients c;
+  c.cii.k10e = t.At(s, C_CII);
+  c.cii.k10HI = t.At(s, C_CII + 1);
+  c.cii.k10H2 = t.At(s, C_CII + 2);
+  c.cii_boltz = t.At(s, C_CII_BOLTZ);
+  Real *ci[9] = {&c.ci.k10HI, &c.ci.k20HI, &c.ci.k21HI, &c.ci.k10H2, &c.ci.k20H2,
+                 &c.ci.k21H2, &c.ci.k10e, &c.ci.k20e, &c.ci.k21e};
+  Real *oi[9] = {&c.oi.k10HI, &c.oi.k20HI, &c.oi.k21HI, &c.oi.k10H2, &c.oi.k20H2,
+                 &c.oi.k21H2, &c.oi.k10e, &c.oi.k20e, &c.oi.k21e};
+  for (int i = 0; i < 9; ++i) {
+    *ci[i] = t.At(s, C_CI + i);
+    *oi[i] = t.At(s, C_OI + i);
+  }
+  for (int i = 0; i < 3; ++i) {
+    c.ci_boltz[i] = t.At(s, C_CI_BOLTZ + i);
+    c.oi_boltz[i] = t.At(s, C_OI_BOLTZ + i);
+  }
+  c.h2geff.geff_H = t.At(s, C_H2GEFF);
+  c.h2geff.geff_H2 = t.At(s, C_H2GEFF + 1);
+  c.h2cool.LHI = t.At(s, C_H2COOL);
+  c.h2cool.LH2 = t.At(s, C_H2COOL + 1);
+  c.h2cool.LHe = t.At(s, C_H2COOL + 2);
+  c.h2cool.LHplus = t.At(s, C_H2COOL + 3);
+  c.h2cool.Le = t.At(s, C_H2COOL + 4);
+  c.h2cool.LTE = t.At(s, C_H2COOL + 5);
+  c.lya_fac = t.At(s, C_LYA);
+  c.lya_k01 = t.At(s, C_LYA + 1);
+  return c;
+}
+
 }  // namespace gow17
 }  // namespace chemistry2
 

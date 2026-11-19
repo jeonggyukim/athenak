@@ -104,8 +104,9 @@ int main(int argc, char *argv[]) {
   so.H2_rovib_cooling = true;
   so.velocity_cgs = 1.0; so.length_cgs = 1.0; so.three_d = true; so.multi_d = true;
   const Real inf = Kokkos::Experimental::infinity_v<Real>;
-  const New::Settings sn{1.0, 0.1, 1.6e-4, 3.2e-4, 1.7e-6, 1.0, inf, inf, 1.0, 1.0e9,
-                         3.0e20, true, false};
+  New::Settings sn{1.0, 0.1, 1.6e-4, 3.2e-4, 1.7e-6, 1.0, inf, inf, 1.0, 1.0e9,
+                   3.0e20, true, false};
+  sn.table = chemistry2::gow17::BuildGOW17Table(false);
   const ode_solvers::SemiImplicitSettings s_old{0.1, 1.0e-12, nsub_max, true};
   const chemistry2::SemiImplicitSettings s_new{0.1, 1.0e-12, nsub_max, true};
   const chemistry2::UnitFactors units =

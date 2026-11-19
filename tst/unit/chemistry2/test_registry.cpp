@@ -28,7 +28,10 @@ int main(int argc, char *argv[]) {
                 "unknown network gives -1");
   report.Expect(chemistry2::Find("h2", "semi_implicit") == -1,
                 "names are case-sensitive");
-  report.Expect(chemistry2::List() == "H2 + semi_implicit, GOW17 + semi_implicit",
+  report.Expect(chemistry2::Find("GOW17_analytic", "semi_implicit") == 2,
+                "Find GOW17_analytic + semi_implicit");
+  report.Expect(chemistry2::List() == "H2 + semi_implicit, GOW17 + semi_implicit, "
+                                      "GOW17_analytic + semi_implicit",
                 "List: " + chemistry2::List());
   report.Expect(chemistry2::SpeciesCount("GOW17") == 12 &&
                 chemistry2::SpeciesCount("H2") == 2 &&

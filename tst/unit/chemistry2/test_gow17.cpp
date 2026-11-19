@@ -28,7 +28,7 @@
 
 namespace {
 
-using New = chemistry2::GOW17;
+using New = chemistry2::GOW17Analytic;  // same fits as src/chemistry, no table
 using Old = chemistry::GOW17Network;
 constexpr int NSPEC = New::NSPEC;
 

@@ -29,7 +29,8 @@ struct Pair {
   using Integrator = Solver<Net>;
 };
 
-using Pairs = std::tuple<Pair<H2, SemiImplicit>, Pair<GOW17, SemiImplicit>>;
+using Pairs = std::tuple<Pair<H2, SemiImplicit>, Pair<GOW17, SemiImplicit>,
+                         Pair<GOW17Analytic, SemiImplicit>>;
 
 constexpr int NUM_PAIRS = static_cast<int>(std::tuple_size_v<Pairs>);
 
