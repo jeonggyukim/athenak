@@ -5,8 +5,9 @@
 //========================================================================================
 //! \file test_thermo.cpp
 //! \brief Every heating and cooling term of chemistry2 against src/chemistry, on random
-//!        physical arguments. The terms were moved with their arithmetic unchanged, so
-//!        they must agree bit for bit; the test guards later edits.
+//!        physical arguments. chemistry2 splits terms into a temperature-only part and
+//!        a state part (from Tigris), which reorders some arithmetic; they agree to
+//!        rounding.
 
 #include <cmath>
 #include <cstdio>
@@ -41,18 +42,25 @@ Real U(Real lo, Real hi) {
 template <class Args, class FOld, class FNew>
 void Compare(unit::Report &report, const std::string &name, Args args, FOld f_old,
              FNew f_new, int n = 20000) {
-  int n_differ = 0, n_nonfinite = 0;
+  int n_nonfinite = 0, n_mismatch = 0;
+  double worst = 0.0;
   for (int s = 0; s < n; ++s) {
     const auto a = args();
     const Real o = f_old(a), w = f_new(a);
-    if (!std::isfinite(o)) ++n_nonfinite;
-    if (!(o == w) && !(std::isnan(o) && std::isnan(w))) ++n_differ;
+    if (!std::isfinite(o)) {
+      ++n_nonfinite;
+      if (std::isfinite(w)) ++n_mismatch;
+      continue;
+    }
+    const double scale = std::fmax(std::fabs(o), 1.0e-300);
+    worst = std::fmax(worst, std::fabs(w - o)/scale);
   }
-  char what[160];
+  char what[200];
   std::snprintf(what, sizeof(what),
-                "%s: equal to src/chemistry on %d draws (%d non-finite)", name.c_str(), n,
-                n_nonfinite);
-  report.Expect(n_differ == 0, what);
+                "%s: within 1e-12 of src/chemistry on %d draws "
+                "(worst %.1e, %d non-finite)", name.c_str(), n, worst, n_nonfinite);
+  std::printf("  %s\n", what);
+  report.Expect(worst <= 1.0e-12 && n_mismatch == 0, what);
 }
 
 struct A {
@@ -91,7 +99,7 @@ int main(int argc, char *argv[]) {
           [](const A &a) { return New::CvCold(a.xH2, 0.1, a.xe, 5.0/3.0); });
   Compare(r, "HeatingCr", Draw,
           [](const A &a) { return Old::HeatingCr(a.xe, a.nH, a.xHI, a.xH2, a.k1); },
-          [](const A &a) { return New::HeatingCr(a.xe, a.nH, a.xHI, a.xH2, a.k1); });
+          [](const A &a) { return New::HeatingCR(a.xe, a.nH, a.xHI, a.xH2, a.k1); });
   Compare(r, "HeatingPE", Draw,
           [](const A &a) { return Old::HeatingPE(a.G, a.Zd, a.T, a.ne); },
           [](const A &a) { return New::HeatingPE(a.G, a.Zd, a.T, a.ne); });
