@@ -17,10 +17,6 @@ ode_solvers = ["kokkos_BDF", "semi_implicit"]
 big_step_rtol = {"kokkos_BDF": 1e-5, "semi_implicit": 2e-2}
 cfl_dependence_rtol = {"kokkos_BDF": 5e-3, "semi_implicit": 2e-2}
 
-# The time series is stored from a kokkos_BDF run and compared output by output;
-# other solvers take a different number of cycles
-time_series_ode_solvers = ["kokkos_BDF"]
-
 # These come from Athena++ at t=1e6. Equilibrium is reached somewhere around t=1e2 or 1e3
 # but we're running the test longer to let any potential small errors compound into
 # something easier to detect.
@@ -105,68 +101,101 @@ def run_gow17_uniform_big_step(ode_solver, mpi=False):
         testutils.cleanup()
 
 
-def run_gow17_uniform_time_series(ode_solver):
-    """Run the GOW17 uniform state test and run a regression test on the time series
-    results."""
+# ----- Reference test -----
+# Each condition is run from t = 0 to each of its check times (tlim is hit exactly) and
+# the final state is compared with a converged Kokkos BDF run (rtol 1e-7, atol 1e-16)
+# stored in data/gow17_reference.npz; make_gow17_reference.py rebuilds it.
+reference_input = "inputs/GOW17_reference.athinput"
+reference_file = "../../test_suite/chemistry/data/gow17_reference.npz"
+
+# Initial abundances of the two physical starts; everything not listed is 1e-12
+_atomic = {"default": 1e-12, "H2": 1e-6, "CO": 1e-12, "C+": 1.6e-4, "H+": 1e-4,
+           "Si+": 1.7e-6}
+_molecular = {"default": 1e-12, "H2": 0.4999, "CO": 1.6e-4, "C+": 1e-12, "H+": 1e-12,
+              "Si+": 1e-12}
+
+# name: (n_H [cm^-3], xi_CR [s^-1], G0 [Draine], initial abundances, check times [Myr])
+check_time_conditions = {
+    # all species 1e-6: far from equilibrium in every species at once
+    "uniform_1e-6": (109.21, 2e-16, 1e-6, None, ["0.1", "0.4", "3", "30"]),
+    # molecular gas suddenly exposed to UV: H2 and CO photodissociated within the first
+    # hydro step, with photodissociation heating
+    "molecular_uv": (1e2, 2e-16, 1.0, _molecular, ["1e-4", "1e-3", "0.01", "0.1"]),
+    # dense shielded gas forming H2 and CO within 0.2 Myr
+    "atomic_dense": (1e4, 2e-16, 1e-6, _atomic, ["0.02", "0.06", "0.15", "1"]),
+    # CO chemistry driven by a high cosmic-ray ionization rate
+    "atomic_high_cr": (1e3, 2e-15, 1e-6, _atomic, ["0.5", "0.8", "1.1", "5"]),
+}
+
+# Largest allowed error at each check time, about twice the measured one
+check_time_tolerance = {
+    "kokkos_BDF": {
+        "uniform_1e-6": [0.06, 0.015, 0.01, 0.01],
+        "molecular_uv": [0.33, 0.3, 0.01, 0.01],
+        "atomic_dense": [0.04, 0.01, 0.02, 0.01],
+        "atomic_high_cr": [0.04, 0.05, 0.05, 0.01],
+    },
+    "semi_implicit": {
+        "uniform_1e-6": [0.13, 0.08, 0.07, 0.01],
+        "molecular_uv": [0.3, 0.5, 0.08, 0.01],
+        "atomic_dense": [0.06, 0.06, 0.2, 0.01],
+        "atomic_high_cr": [0.2, 0.35, 0.25, 0.01],
+    },
+}
+
+# Species compared, and the abundance per H of the element each one carries; the error
+# of a species is |x - x_ref| / max(x_ref, 1e-3 x_elem), so trace species do not set it
+check_time_species = {"He+": 0.1, "OHx": 3.2e-4, "CHx": 1.6e-4, "CO": 1.6e-4,
+                      "C+": 1.6e-4, "HCO+": 1.6e-4, "H2": 1.0, "H+": 1.0, "H3+": 1.0,
+                      "H2+": 1.0, "O+": 3.2e-4, "Si+": 1.7e-6}
+
+
+def check_time_args(name, check_time, ode_solver):
+    """Command-line arguments for one check-time run."""
+    n_h, xi_cr, g0, init, _ = check_time_conditions[name]
+    args = [f"chemistry/ode_solver={ode_solver}", f"time/tlim={check_time}",
+            f"problem/n_H={n_h}", f"chemistry/radiation_CR={xi_cr}",
+            f"chemistry/radiation_G0={g0}"]
+    if init is not None:
+        args.append(f"problem/init_default={init['default']}")
+        args += [f"problem/init_{k}={v}" for k, v in init.items() if k != "default"]
+    return args
+
+
+def check_time_state(ode_solver, name, check_time, extra_args=()):
+    """Run one condition to one check time; return its final internal energy and
+    abundances."""
     try:
-        cli_args = [
-            f"chemistry/ode_solver={ode_solver}",
-        ]
-
-        # Run AthenaK
-        input_file = "inputs/GOW17_uniform_time_series.athinput"
-        results = testutils.run(input_file, cli_args)
-        assert results, (
-            f"GOW17 uniform time series test run failed for {ode_solver} solver."
+        args = check_time_args(name, check_time, ode_solver) + list(extra_args)
+        assert testutils.run(reference_input, args), (
+            f"GOW17 reference run failed: {ode_solver}, {name}, t = {check_time}"
         )
-
-        # Get a list of all the files
-        data_path = pathlib.Path("./tab/")
-        files = sorted(data_path.glob("GOW17_uniform.hydro_w.*.tab"))
-
-        # Collect all the data into a single array for easy comparison
-        dataset_names = (
-            "dens",
-            "velx",
-            "vely",
-            "velz",
-            "eint",
-            "s_00_chem_He+",
-            "s_01_chem_OHx",
-            "s_02_chem_CHx",
-            "s_03_chem_CO",
-            "s_04_chem_C+",
-            "s_05_chem_HCO+",
-            "s_06_chem_H2",
-            "s_07_chem_H+",
-            "s_08_chem_H3+",
-            "s_09_chem_H2+",
-            "s_10_chem_O+",
-            "s_11_chem_Si+",
-        )
-        test_time_series = np.empty(
-            len(files), dtype=[(name, "f4") for name in dataset_names]
-        )
-
-        # Gather data
-        for i, f in enumerate(files):
-            data = athena_read.tab(f)
-            for name in dataset_names:
-                test_time_series[name][i] = data[name][0]
-
-        # Load the fiducial data
-        fiducial_time_series = np.load(
-            "../../test_suite/chemistry/data/gow17_time_series.npz"
-        )["time_series"]
-
-        # Compare all results
-        for name in dataset_names:
-            assert np.allclose(test_time_series[name], fiducial_time_series[name]), (
-                f"The {name} dataset contains incorrect value(s)."
-            )
-
+        last = sorted(pathlib.Path("./tab/").glob("GOW17_uniform.hydro_w.*.tab"))[-1]
+        data = athena_read.tab(last)
+        state = {"eint": data["eint"][0]}
+        for k in check_time_species:
+            state[k] = data[f"s_{list(check_time_species).index(k):02d}_chem_{k}"][0]
+        return state
     finally:
         testutils.cleanup()
+
+
+def run_gow17_reference(ode_solver):
+    """Compare each condition at each check time with the converged reference."""
+    reference = np.load(reference_file)
+    for name, (*_, times) in check_time_conditions.items():
+        for i, t in enumerate(times):
+            state = check_time_state(ode_solver, name, t)
+            ref = reference[f"{name}_t{t}"]
+            errors = {"eint": abs(state["eint"] / ref[0] - 1)}
+            for j, (k, x_elem) in enumerate(check_time_species.items()):
+                errors[k] = abs(state[k] - ref[j + 1]) / max(ref[j + 1], 1e-3 * x_elem)
+            worst = max(errors, key=errors.get)
+            tol = check_time_tolerance[ode_solver][name][i]
+            assert errors[worst] <= tol, (
+                f"{ode_solver}, {name}, t = {t} Myr: {worst} error {errors[worst]:.3g} "
+                f"exceeds {tol}"
+            )
 
 
 def run_gow17_cfl_dependence(ode_solver, mpi=False):
@@ -246,7 +275,7 @@ def test_gow17_cfl_dependence_cpu(ode_solver):
     run_gow17_cfl_dependence(ode_solver)
 
 
-@pytest.mark.parametrize("ode_solver", time_series_ode_solvers)
-def test_gow17_uniform_time_series_cpu(ode_solver):
-    """CPU Test for GOW17 time series problem."""
-    run_gow17_uniform_time_series(ode_solver)
+@pytest.mark.parametrize("ode_solver", ode_solvers)
+def test_gow17_reference_gpu(ode_solver):
+    """GPU Test for GOW17 abundances at fixed times against a converged reference."""
+    run_gow17_reference(ode_solver)

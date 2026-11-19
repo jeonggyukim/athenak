@@ -1,4 +1,5 @@
-# AthenaXXX input file for the chemistry test with the GOW17 network and uniform abundance
+# AthenaXXX input file for the GOW17 reference test: a uniform box run to tlim, with
+# density, radiation and initial abundances set per condition on the command line
 
 <comment>
 problem   = GOW17 chemistry test case
@@ -37,7 +38,7 @@ evolution  = dynamic   # dynamic/kinematic/static
 integrator = rk2       # time integration algorithm
 cfl_number = 0.8       # The Courant, Friedrichs, & Lewy (CFL) Number
 nlim       = -1        # cycle limit
-tlim       = 30.       # time limit, units of millions of years
+tlim       = 30.       # time limit, units of millions of years; set per check time
 ndiag      = 1         # cycles between diagnostic output
 
 <hydro>
@@ -58,6 +59,10 @@ mu          = 1.27                    # mean molecular weight
 <chemistry>
 network                    = GOW17      # Chemistry network to be used
 ode_solver                 = kokkos_BDF # ODE solver to be used
+kokkos_BDF_rtol            = 1e-3       # BDF relative tolerance
+kokkos_BDF_atol            = 1e-6       # BDF absolute tolerance
+radiation_G0               = 1e-6       # FUV field, Draine units
+radiation_CR               = 2e-16      # cosmic-ray ionization rate per H, s^-1
 
 # chemistry network parameters:
 GOW17_Z_d        = 1.           # dust metallicity
@@ -71,12 +76,17 @@ GOW17_xSi        = 1.7e-6       # Si atom per H, this is Z=1 value, default 1.7e
 pgen_name   = GOW17_uniform # problem generator name
 n_H         = 1.0921e+02    # initial density, in units of number density of hydrogen atoms
 vx_kms      = 0.0           # initial x-velocity, in km/s
-init_default = 1.0e-6       # initial abundances
+init_default = 1.0e-6       # initial abundances not listed below
+init_H2     = 1.0e-6        # initial abundances that a condition may change
+init_CO     = 1.0e-6
+init_C+     = 1.0e-6
+init_H+     = 1.0e-6
+init_Si+    = 1.0e-6
 
 <output1>
 file_type   = tab       # Tabular data dump
 variable    = hydro_w   # variables to be output
-data_format = %12.5e    # Optional data format string
-dcycle      = 1         # output interval in cycles
+data_format = %.10e     # Optional data format string
+dcycle      = 100000000 # first and last cycle only
 slice_x2    = 0.0       # slice in x2
 slice_x3    = 0.0       # slice in x3
