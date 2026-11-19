@@ -1,0 +1,92 @@
+# AthenaXXX input file for the GOW17 reference test: a uniform box run to tlim, with
+# density, radiation and initial abundances set per condition on the command line
+
+<comment>
+problem   = GOW17 chemistry test case
+reference = Section 4.1 in Gong et al. 2023, arXiv:2305.04965
+
+<job>
+basename  = GOW17_uniform # problem ID: basename of output filenames
+
+<mesh>
+nghost    = 2         # Number of ghost cells
+nx1       = 4         # Number of zones in X1-direction
+x1min     = -0.03125  # minimum value of X1
+x1max     = 0.03125   # maximum value of X1
+ix1_bc    = periodic  # Inner-X1 boundary condition flag
+ox1_bc    = periodic  # Outer-X1 boundary condition flag
+
+nx2       = 4         # Number of zones in X2-direction
+x2min     = -0.03125  # minimum value of X2
+x2max     = 0.03125   # maximum value of X2
+ix2_bc    = periodic  # Inner-X2 boundary condition flag
+ox2_bc    = periodic  # Outer-X2 boundary condition flag
+
+nx3       = 4         # Number of zones in X3-direction
+x3min     = -0.03125 # minimum value of X3
+x3max     = 0.03125  # maximum value of X3
+ix3_bc    = periodic   # Inner-X3 boundary condition flag
+ox3_bc    = periodic   # Outer-X3 boundary condition flag
+
+<meshblock>
+nx1       = 4         # Number of cells in each MeshBlock, X1-dir
+nx2       = 4         # Number of cells in each MeshBlock, X2-dir
+nx3       = 4         # Number of cells in each MeshBlock, X3-dir
+
+<time>
+evolution  = dynamic   # dynamic/kinematic/static
+integrator = rk2       # time integration algorithm
+cfl_number = 0.8       # The Courant, Friedrichs, & Lewy (CFL) Number
+nlim       = -1        # cycle limit
+tlim       = 30.       # time limit, units of millions of years; set per check time
+ndiag      = 1         # cycles between diagnostic output
+
+<hydro>
+eos             = ideal             # EOS type
+reconstruct     = plm               # spatial reconstruction method
+rsolver         = llf               # Riemann-solver to be used
+gamma           = 1.666666666666667 # gamma = C_p/C_v
+nscalars        = 0                 # number of passive scalars in hydro
+iso_sound_speed = 1.0               # isothermal sound speed
+
+<units> 
+# ISM units
+length_cgs  = 3.0856775809623245e+18  # length is 1 pc
+mass_cgs    = 6.882615081124725e+31   # number density is 1 cm^-3
+time_cgs    = 3.08567758e+13          # time is 1 Myr
+mu          = 1.27                    # mean molecular weight
+
+<chemistry2>
+network                    = GOW17      # Chemistry network to be used
+ode_solver                 = kokkos_BDF # ODE solver to be used
+kokkos_BDF_rtol            = 1e-3       # BDF relative tolerance
+kokkos_BDF_atol            = 1e-6       # BDF absolute tolerance
+radiation_G0               = 1e-6       # FUV field, Draine units
+radiation_CR               = 2e-16      # cosmic-ray ionization rate per H, s^-1
+
+# chemistry network parameters:
+GOW17_Z_d        = 1.           # dust metallicity
+GOW17_Z_g        = 1.           # gas metallicity
+GOW17_xHe        = 0.1          # He per H, default = 0.1
+GOW17_xC         = 1.6e-4       # C atom per H, this is Z=1 value, default 1.6e-4
+GOW17_xO         = 3.2e-4       # O atom per H, this is Z=1 value, default 3.2e-4
+GOW17_xSi        = 1.7e-6       # Si atom per H, this is Z=1 value, default 1.7e-6
+
+<problem>
+pgen_name   = GOW17_uniform # problem generator name
+n_H         = 1.0921e+02    # initial density, in units of number density of hydrogen atoms
+vx_kms      = 0.0           # initial x-velocity, in km/s
+init_default = 1.0e-6       # initial abundances not listed below
+init_H2     = 1.0e-6        # initial abundances that a condition may change
+init_CO     = 1.0e-6
+init_C+     = 1.0e-6
+init_H+     = 1.0e-6
+init_Si+    = 1.0e-6
+
+<output1>
+file_type   = tab       # Tabular data dump
+variable    = hydro_w   # variables to be output
+data_format = %.10e     # Optional data format string
+dcycle      = 100000000 # first and last cycle only
+slice_x2    = 0.0       # slice in x2
+slice_x3    = 0.0       # slice in x3
