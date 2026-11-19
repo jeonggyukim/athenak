@@ -9,10 +9,11 @@
 //! \brief Heating and cooling terms, shared by every chemical network.
 //!
 //!   Each term is a function of physical quantities only. A term with a temperature-only
-//!   part is split in two: XRates(T) returns the coefficients that depend on T alone
-//!   (computed once per substep, or read from a table), and XFrom(state, coefficients)
-//!   does the rest, so terms that share coefficients (H2 formation heating and H2 pumping
-//!   share H2GeffRates) compute them once. Ported from Tigris
+//!   part is split in two: a coefficient struct built from T, e.g.
+//!   OIRateCoefficients(T) (computed once per substep, or later read from a table), and
+//!   XFrom(state, coefficients) for the rest, so terms that share coefficients (H2
+//!   formation heating and H2 pumping share H2GeffRateCoefficients) compute them once.
+//!   Ported from Tigris
 //!   src/photchem/network/gow17_thermo.hpp (f7adb3308), itself derived from
 //!   src/chemistry/thermo/thermo.hpp.
 
@@ -28,10 +29,8 @@ class Thermo {
   Thermo() {}
   ~Thermo() = default;
 
-  // Collisional coefficients for the fine-structure coolers and the two H2
-  // heating terms. Each is filled either by the matching Rates(T) helper or by
-  // a ThermoTable lookup; the table is built from the same helpers, so the two
-  // sources cannot diverge.
+  // Coefficients for the fine-structure coolers, the two H2 heating terms and H2
+  // cooling, each a function of T alone.
   //
   // Declared ahead of every function taking one as a parameter: a member
   // function body may name a type declared later in the class, a parameter list
