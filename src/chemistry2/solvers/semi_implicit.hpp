@@ -125,6 +125,9 @@ class SemiImplicit {
     Real h = t_left;
     if (e > 0.0) h = Kokkos::fmin(h, s.dt_sub_frac*e/(Kokkos::fabs(edot) + SMALL));
     ((h = Kokkos::fmin(h, LimitBySpecies<K>(s, y, e, cell, sub))), ...);
+    if constexpr (HasMaxStep<Network>::value) {
+      h = Kokkos::fmin(h, Network::MaxStep(s.dt_sub_frac, y, e, cell, sub));
+    }
     return h;
   }
 
@@ -171,6 +174,14 @@ class SemiImplicit {
   //! A network that sets `static constexpr bool EDOT_DERIVATIVE = true` supplies
   //! EdotWithDerivative(y, e, cell, sub, &dedot_de): edot, and d(edot)/de at fixed
   //! species, from one evaluation
+  //! A network that sets `static constexpr bool MAX_STEP = true` supplies
+  //! MaxStep(dt_sub_frac, y, e, cell, sub), its own substep limit [code time]
+  template <class N, class = void>
+  struct HasMaxStep : std::false_type {};
+  template <class N>
+  struct HasMaxStep<N, std::void_t<decltype(N::MAX_STEP)>>
+      : std::bool_constant<N::MAX_STEP> {};
+
   template <class N, class = void>
   struct HasEdotDerivative : std::false_type {};
   template <class N>

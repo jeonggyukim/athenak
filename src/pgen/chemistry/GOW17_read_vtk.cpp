@@ -237,17 +237,25 @@ void ProblemGenerator::GOW17ReadVTK(ParameterInput *pin, const bool restart) {
   fld.template sync<DevMemSpace>();
   auto fld_d = fld.d_view;
 
-  DualArray1D<Real> initial_chemistry("initial_chemistry",
-                                      chemistry::GOW17Network::neqs - 1);
+  // the species of the active module: GOW17's under <chemistry>, the active chemical
+  // network's (GOW17, NCR, ...) under <chemistry2>
+  const int nspec = (pmbp->pchemistry2 != nullptr)
+                        ? pmbp->pchemistry2->LastScalar() -
+                              pmbp->pchemistry2->FirstScalar() + 1
+                        : chemistry::GOW17Network::neqs - 1;
+  DualArray1D<Real> initial_chemistry("initial_chemistry", nspec);
   if (chemistry_on) {
     // Athena++'s read_vtk calls this r_init; the per-species keys of the other
     // GOW17 problems still override it, so the two readers agree by default.
     const Real r_init = pin->GetOrAddReal("problem", "r_init", 0.0);
-    for (size_t i = 0; i < chemistry::GOW17Network::neqs - 1; i++) {
-      const auto name = chemistry::GOW17Network::species_names[i];
-      const auto init_name = std::string("init_") + std::string(name);
+    for (int i = 0; i < nspec; i++) {
+      const std::string name =
+          (pmbp->pchemistry2 != nullptr)
+              ? pmbp->pchemistry2->SpeciesName(pmbp->pchemistry2->FirstScalar() + i)
+                    .substr(5)  // drop "chem_"
+              : std::string(chemistry::GOW17Network::species_names[i]);
       initial_chemistry.view_host()(i) =
-          pin->GetOrAddReal("problem", init_name, r_init);
+          pin->GetOrAddReal("problem", "init_" + name, r_init);
     }
   }
   initial_chemistry.modify_host();
@@ -269,7 +277,7 @@ void ProblemGenerator::GOW17ReadVTK(ParameterInput *pin, const bool restart) {
         w0(m, IEN, k, j, i) = fld_d(m, 4, kf, jf, if_);
 
         if (chemistry_on) {
-          for (size_t s = 0; s < chemistry::GOW17Network::neqs - 1; s++) {
+          for (int s = 0; s < nspec; s++) {
             w0(m, chem_start + s, k, j, i) = initial_chemistry_d(s);
           }
         }

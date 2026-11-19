@@ -58,10 +58,11 @@ const typename Net::Settings &SettingsOf(const NetworkSettings &s) {
     return s.h2;
   } else if constexpr (std::is_same_v<Net, GOW17>) {
     return s.gow17;
-  } else {
-    static_assert(std::is_same_v<Net, GOW17Analytic>,
-                  "add the network's settings to SettingsOf");
+  } else if constexpr (std::is_same_v<Net, GOW17Analytic>) {
     return s.gow17_analytic;
+  } else {
+    static_assert(std::is_same_v<Net, NCR>, "add the network's settings to SettingsOf");
+    return s.ncr;
   }
 }
 
