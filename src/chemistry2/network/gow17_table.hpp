@@ -68,7 +68,8 @@ inline void FillRow(const Real T, const bool kgr_h2_const, Real *row) {
   v[C_CII + 1] = cii.k10HI;
   v[C_CII + 2] = cii.k10H2;
   v[C_CII_BOLTZ] = Kokkos::exp(-Thermo::E10CII()/(k_boltzmann_cgs*T));
-  const Thermo::CIRateCoefficients ci(T);
+  // C I cooling is cut off above 1e6 K, and its electron fits overflow above ~1e7 K
+  const Thermo::CIRateCoefficients ci(Kokkos::fmin(T, 1.0e6));
   const Real ci_k[9] = {ci.k10HI, ci.k20HI, ci.k21HI, ci.k10H2, ci.k20H2, ci.k21H2,
                         ci.k10e, ci.k20e, ci.k21e};
   const Thermo::OIRateCoefficients oi(T);
