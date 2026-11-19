@@ -25,6 +25,8 @@
 #include "parameter_input.hpp"
 #include "chemistry2/inputs/cell_inputs.hpp"
 #include "chemistry2/network/ncr_rates.hpp"
+#include "chemistry2/network/ncr_table.hpp"
+#include "chemistry2/rates/row_table.hpp"
 #include "chemistry2/network/network_config.hpp"
 #include "chemistry2/network/species_table.hpp"
 #include "chemistry2/thermo/dust.hpp"
@@ -35,15 +37,18 @@
 
 namespace chemistry2 {
 
-struct NCR {
-  static constexpr std::string_view NAME = "NCR";  // <chemistry2>/network
+//! TABLE: temperature-only coefficients from the NCR rate table (the default, "NCR"), or
+//! from the fits ("NCR_analytic", for comparisons with Tigris)
+template <bool TABLE>
+struct NCRNetwork {
+  static constexpr std::string_view NAME = TABLE ? "NCR" : "NCR_analytic";
   static constexpr std::array<SpeciesRow, 3> rows = {
       Species("H2").H(2), Species("H+").Charge(1).H(1), Species("e")};
   static constexpr bool STORES_ELECTRONS = true;
   static constexpr int ROW_EL = 2;
   static constexpr int HYDROGEN_REMAINDER_CHARGE = 0;
   enum : int {IH2, IH_PLUS, IE};
-  static constexpr int NSPEC = NumSpecies<NCR>();
+  static constexpr int NSPEC = NumSpecies<NCRNetwork>();
   using UpdateOrder = std::integer_sequence<int, IH2>;  // the H2/H+ block, then e
   using StepLimitingSpecies = std::integer_sequence<int>;  // MaxStep instead
   static constexpr bool MAX_STEP = true;
@@ -59,9 +64,16 @@ struct NCR {
     bool h2_rovib_cooling;
     bool dust_cooling;
     Real temp_dust, alpha_gd;
+    RowTable table;              // NCR rate table (TABLE only)
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
+    Settings s = ReadValues(pin, b);
+    if constexpr (TABLE) s.table = ncr::BuildNCRTable();
+    return s;
+  }
+
+  static Settings ReadValues(ParameterInput *pin, const std::string &b) {
     return Settings{pin->GetOrAddReal(b, "NCR_Z_d", 1.0),
                     pin->GetOrAddReal(b, "NCR_Z_g", 1.0),
                     pin->GetOrAddReal(b, "NCR_xHe", 0.1),
@@ -74,7 +86,7 @@ struct NCR {
                     pin->GetOrAddBoolean(b, "NCR_H2_rovib_cooling", true),
                     pin->GetOrAddBoolean(b, "NCR_dust_cooling", false),
                     pin->GetOrAddReal(b, "NCR_dust_temperature", 10.0),
-                    pin->GetOrAddReal(b, "NCR_alpha_gd", 0.0)};
+                    pin->GetOrAddReal(b, "NCR_alpha_gd", 0.0), RowTable()};
   }
 
   struct Cell {
@@ -103,12 +115,63 @@ struct NCR {
     return c;
   }
 
+  //! Rate coefficients that depend on T alone
+  struct TCoef {
+    Real alpha_b, k_coll, alpha_cii, k_ch2p, kgr_fac;
+    Real l9l, l9h, l10l, l10h, ncr_h2, ncr_hi, k1619;
+  };
+
+  KOKKOS_INLINE_FUNCTION static TCoef Coefficients(const Real T, const Cell &c,
+                                                   Slot *slot) {
+    TCoef k;
+    if constexpr (TABLE) {
+      const RowTable &t = c.s.table;
+      *slot = t.grid.Locate(T);
+      const Slot &s = *slot;
+      k.alpha_b = t.At(s, ncr::C_ALPHA_B);
+      k.k_coll = t.At(s, ncr::C_K_COLL_HI);
+      k.alpha_cii = t.At(s, ncr::C_ALPHA_CII);
+      k.k_ch2p = t.At(s, ncr::C_K_CH2P);
+      k.kgr_fac = t.At(s, ncr::C_KGR_FAC);
+      k.l9l = t.At(s, ncr::C_L9L);
+      k.l9h = t.At(s, ncr::C_L9H);
+      k.l10l = t.At(s, ncr::C_L10L);
+      k.l10h = t.At(s, ncr::C_L10H);
+      k.ncr_h2 = t.At(s, ncr::C_NCR_H2);
+      k.ncr_hi = t.At(s, ncr::C_NCR_HI);
+      k.k1619 = t.At(s, ncr::C_K1619);
+    } else {
+      k.alpha_b = ncr::AlphaBHII(T);
+      k.k_coll = ncr::CollIonHI(T);
+      k.alpha_cii = ncr::AlphaCII(T);
+      k.k_ch2p = 3.3e-13*Kokkos::pow(T, -1.3)*Kokkos::exp(-23.0/T);
+      const Real T2 = T*1e-2;
+      k.kgr_fac = Kokkos::sqrt(T2)*2.0/(1.0 + 0.4*Kokkos::sqrt(T2) + 0.2*T2 +
+                                        0.08*T2*T2);
+      const Real Tc = Kokkos::fmax(T, 7.0e2), inv_T = 1.0/Tc;
+      const Real lt4 = Kokkos::log10(Tc*1e-4);
+      k.l9l = Kokkos::log10(6.67e-12*Kokkos::sqrt(Tc)*
+                            Kokkos::exp(-(1.0 + 63590.0*inv_T)));
+      k.l9h = Kokkos::log10(3.52e-9*Kokkos::exp(-43900.0*inv_T));
+      k.l10l = Kokkos::log10(5.996e-30*Kokkos::pow(Tc, 4.1881)/
+                             Kokkos::pow(1.0 + 6.761e-6*Tc, 5.6881)*
+                             Kokkos::exp(-54657.4*inv_T));
+      k.l10h = Kokkos::log10(1.3e-9*Kokkos::exp(-53300.0*inv_T));
+      k.ncr_h2 = Kokkos::pow(10.0, 4.845 - 1.3*lt4 + 1.62*lt4*lt4);
+      k.ncr_hi = Kokkos::pow(10.0, 3.0 - 0.416*lt4 - 0.327*lt4*lt4);
+      k.k1619 = 1.0e-7*Kokkos::pow(T*1e-2, -0.5);
+    }
+    return k;
+  }
+
   //! One substep: temperature, closures, and the rates [s^-1] at the substep start
   struct Substep {
     Real T, x_hi, x_e;
     Real x_cii, x_co, x_ci, x_oi;
     Real c_hii, d_hii, c_h2, d_h2;  // dx/dt = c x_HI - d x (Tigris form)
     Real k_coll_hi, kgr, k_h2_h, k_h2_h2;
+    TCoef tc;
+    Slot slot;  // table rows of T (TABLE only)
   };
 
   KOKKOS_INLINE_FUNCTION static Real Temperature(const Real *y, const Real e,
@@ -119,7 +182,8 @@ struct NCR {
 
   //! x_C+ in equilibrium (Tigris GetxCII), with the stored (lagged) x_e
   KOKKOS_INLINE_FUNCTION static Real XCII(const Real x_e, const Real x_h2, const Real T,
-                                          const Real lnT, const Cell &c) {
+                                          const Real lnT, const Cell &c,
+                                          const TCoef &tc) {
     const Real n_h = c.n_h;
     const Real k_cr = 3.85*c.xi_cr;
     Real k_ph = 3.5e-10*c.chi;
@@ -127,16 +191,15 @@ struct NCR {
     const Real psi = 1.7*c.chi*Kokkos::sqrt(T)/(n_h*x_e + 1e-50) + 1e-50;
     constexpr Real CCP[7] = {45.58, 6.089e-3, 1.128, 4.331e2, 4.845e-2, 0.8120, 1.333e-4};
     const Real k_gr = ncr::GrainRec(CCP, T, lnT, psi)*c.s.zd;
-    const Real k_h2 = 3.3e-13*Kokkos::pow(T, -1.3)*Kokkos::exp(-23.0/T);
     const Real cc = (k_cr + k_ph)/n_h;
-    return ncr::X_C_STD*c.s.zg*cc/(ncr::AlphaCII(T)*x_e + k_gr + k_h2*x_h2 + cc);
+    return ncr::X_C_STD*c.s.zg*cc/(tc.alpha_cii*x_e + k_gr + tc.k_ch2p*x_h2 + cc);
   }
 
   //! Electrons from molecular ions (Tigris GetxeMol)
-  KOKKOS_INLINE_FUNCTION static Real XeMol(const Real x_e, const Real x_h2, const Real T,
-                                           const Cell &c) {
+  KOKKOS_INLINE_FUNCTION static Real XeMol(const Real x_e, const Real x_h2, const Cell &c,
+                                           const TCoef &tc) {
     const Real k1620 = 1e-14*c.s.zd, k1622 = 1e-14*c.s.zd, k1621 = 1e-9;
-    const Real k1619 = 1.0e-7*Kokkos::pow(T*1e-2, -0.5);
+    const Real k1619 = tc.k1619;
     const Real phi_s = (1.0 - x_e/ncr::X_EL_MAX)*0.67/(1.0 + x_e/0.05);
     const Real x_s = 5.3e-6*c.s.zg;
     const Real a = k1619*(1.0 + k1621/k1622*x_s);
@@ -160,7 +223,7 @@ struct NCR {
   KOKKOS_INLINE_FUNCTION static void SetClosures(const Real *y, const Real T,
                                                  const Real lnT, const Cell &c,
                                                  Substep &sub) {
-    sub.x_cii = XCII(y[IE], y[IH2], T, lnT, c);
+    sub.x_cii = XCII(y[IE], y[IH2], T, lnT, c, sub.tc);
     const Real x_oii = y[IH_PLUS]*ncr::X_O_STD*c.s.zg;
     sub.x_co = XCO(y[IH2], sub.x_cii, x_oii, c);
     sub.x_ci = Kokkos::fmax(ncr::X_C_STD*c.s.zg - sub.x_cii - sub.x_co, ncr::TINY);
@@ -175,10 +238,12 @@ struct NCR {
     sub.T = T;
     sub.x_e = y[IE];
     sub.x_hi = Kokkos::fmax(1.0 - 2.0*y[IH2] - y[IH_PLUS], ncr::TINY);
+    sub.tc = Coefficients(T, c, &sub.slot);
+    const TCoef &tc = sub.tc;
     SetClosures(y, T, lnT, c, sub);
     const Real n_h = c.n_h, n_e = y[IE]*n_h;
     // H+
-    sub.k_coll_hi = ncr::CollIonHI(T);
+    sub.k_coll_hi = tc.k_coll;
     Real a_gr = 0.0;
     if (T < ncr::TEMP_HOT1) {
       constexpr Real CHP[7] = {12.25, 8.074e-6, 1.378, 5.087e2, 1.586e-2, 0.4723,
@@ -193,32 +258,18 @@ struct NCR {
     }
     const Real xi_h = c.xi_cr*(2.3*y[IH2] + 1.5*sub.x_hi);
     sub.c_hii = sub.k_coll_hi*n_e + xi_h;
-    sub.d_hii = n_e*ncr::AlphaBHII(T) + n_h*a_gr;
+    sub.d_hii = n_e*tc.alpha_b + n_h*a_gr;
     // H2
     sub.k_h2_h = 0.0;
     sub.k_h2_h2 = 0.0;
     if (T < c.s.temp_hot1) {
-      const Real T2 = T*1e-2;
-      sub.kgr = c.s.kgr_h2_t
-                    ? c.s.kgr_h2*c.s.zd*Kokkos::sqrt(T2)*2.0/
-                          (1.0 + 0.4*Kokkos::sqrt(T2) + 0.2*T2 + 0.08*T2*T2)
-                    : c.s.kgr_h2*c.s.zd;
+      sub.kgr = c.s.kgr_h2_t ? c.s.kgr_h2*c.s.zd*tc.kgr_fac : c.s.kgr_h2*c.s.zd;
       if (T > 7.0e2) {
-        const Real inv_T = 1.0/T;
-        const Real lt4 = Kokkos::log10(T*1e-4);
-        const Real l9l = Kokkos::log10(6.67e-12*Kokkos::sqrt(T)*
-                                       Kokkos::exp(-(1.0 + 63590.0*inv_T)));
-        const Real l9h = Kokkos::log10(3.52e-9*Kokkos::exp(-43900.0*inv_T));
-        const Real l10l = Kokkos::log10(5.996e-30*Kokkos::pow(T, 4.1881)/
-                                        Kokkos::pow(1.0 + 6.761e-6*T, 5.6881)*
-                                        Kokkos::exp(-54657.4*inv_T));
-        const Real l10h = Kokkos::log10(1.3e-9*Kokkos::exp(-53300.0*inv_T));
-        const Real ncr_h2 = Kokkos::pow(10.0, 4.845 - 1.3*lt4 + 1.62*lt4*lt4);
-        const Real ncr_hi = Kokkos::pow(10.0, 3.0 - 0.416*lt4 - 0.327*lt4*lt4);
-        const Real inv_ncr = Kokkos::fmax(sub.x_hi/ncr_hi + 2.0*y[IH2]/ncr_h2, 1e-50);
+        const Real inv_ncr = Kokkos::fmax(sub.x_hi/tc.ncr_hi + 2.0*y[IH2]/tc.ncr_h2,
+                                          1e-50);
         const Real n2 = n_h*inv_ncr, w = n2/(1.0 + n2), w0 = 1.0/(1.0 + n2);
-        sub.k_h2_h = Kokkos::pow(10.0, l9h*w + l9l*w0);
-        sub.k_h2_h2 = Kokkos::pow(10.0, l10h*w + l10l*w0);
+        sub.k_h2_h = Kokkos::pow(10.0, tc.l9h*w + tc.l9l*w0);
+        sub.k_h2_h2 = Kokkos::pow(10.0, tc.l10h*w + tc.l10l*w0);
       }
       const Real xi_coll = (sub.k_h2_h2*y[IH2] + sub.k_h2_h*sub.x_hi)*n_h;
       sub.c_h2 = sub.kgr*n_h;
@@ -235,10 +286,10 @@ struct NCR {
   //! below TEMP_HOT0; the hot branch with CIE comes with P4)
   KOKKOS_INLINE_FUNCTION static Real FreeElectrons(const Real x_e_old, const Real x_h2,
                                                    const Real x_hii, const Real T,
-                                                   const Cell &c) {
+                                                   const Cell &c, const TCoef &tc) {
     const Real lnT = Kokkos::log(T);
-    const Real x_cii = XCII(x_e_old, x_h2, T, lnT, c);
-    return x_hii + x_cii + x_hii*ncr::X_O_STD*c.s.zg + XeMol(x_e_old, x_h2, T, c);
+    const Real x_cii = XCII(x_e_old, x_h2, T, lnT, c, tc);
+    return x_hii + x_cii + x_hii*ncr::X_O_STD*c.s.zg + XeMol(x_e_old, x_h2, c, tc);
   }
 
   //! Creation c [per H per code time] and destruction d [per code time]
@@ -288,7 +339,7 @@ struct NCR {
     }
     y[IH2] = x_h2;
     y[IH_PLUS] = x_hii;
-    y[IE] = FreeElectrons(y_n[IE], x_h2, x_hii, sub.T, cl);
+    y[IE] = FreeElectrons(y_n[IE], x_h2, x_hii, sub.T, cl, sub.tc);
   }
 
   //! Largest substep [code time]: frac over the absolute rates of change of x_H+ and x_H2
@@ -354,6 +405,9 @@ struct NCR {
 
   KOKKOS_INLINE_FUNCTION static void Closures(Real *, const Real *, const Cell &) {}
 };
+
+using NCR = NCRNetwork<true>;
+using NCRAnalytic = NCRNetwork<false>;
 
 }  // namespace chemistry2
 

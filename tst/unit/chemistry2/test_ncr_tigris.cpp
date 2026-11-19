@@ -23,7 +23,7 @@
 #include "chemistry2/network/ncr.hpp"
 
 namespace {
-using Net = chemistry2::NCR;
+using Net = chemistry2::NCRAnalytic;  // the fits, as Tigris interp_mode 0
 constexpr Real MU_H = 1.4, GAMMA = 5.0/3.0, U_TIME = 3.15576e13, U_ENERGY = 1.0e-12;
 
 double Rel(double a, double b) {
@@ -66,7 +66,8 @@ int main(int argc, char *argv[]) {
     const Real e = n_h*chemistry2::Thermo::CvCold(x_h2, 0.1, x_e, GAMMA)*T/U_ENERGY;
     const Net::Substep s = Net::Prepare(y, e, c);
     const double got[7] = {s.c_h2, s.d_h2, s.c_hii, s.d_hii,
-                           Net::FreeElectrons(x_e, x_h2, x_hii, s.T, c), s.x_cii, s.x_co};
+                           Net::FreeElectrons(x_e, x_h2, x_hii, s.T, c, s.tc), s.x_cii,
+                           s.x_co};
     for (int k = 0; k < 6; ++k) worst[k] = std::fmax(worst[k], Rel(got[k], ref[k]));
     // x_CO carries x_C,tot - x_C+, which cancels where carbon is all C+: compare on the
     // scale 2 x_H2 x_C,tot

@@ -18,7 +18,7 @@
 #include "chemistry2/solvers/semi_implicit.hpp"
 
 namespace {
-using Net = chemistry2::NCR;
+using Net = chemistry2::NCRAnalytic;
 constexpr int NSPEC = Net::NSPEC;
 constexpr Real MU_H = 1.4, GAMMA = 5.0/3.0, U_TIME = 3.15576e13, U_ENERGY = 1.0e-12;
 
