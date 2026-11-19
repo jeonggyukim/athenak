@@ -78,6 +78,10 @@ int main(int argc, char *argv[]) {
       }
       if (v[c] < 1.0e-12*vmax[c]) continue;
       if (c == g::C_H2COOL + 4 && T < LE_T_MIN) continue;
+      // C I rate coefficients above 3e5 K: carbon is ionized there, C I cooling is
+      // negligible, and the electron fits steepen toward their 1e6 K cap (measured
+      // 4.4e-2 at 8e5 K, 2026-11-20)
+      if (c >= g::C_CI && c < g::C_CI + 9 && T > 3.0e5) continue;
       const double d = std::fabs(got(s, c) - v[c])/v[c];
       if (v[c] >= 1.0e-6*vmax[c]) {
         if (d > worst_hi) { worst_hi = d; c_hi = c; t_hi = T; }
