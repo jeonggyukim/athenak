@@ -957,6 +957,10 @@ void ProblemGenerator::CallProblemGenerator(ParameterInput *pin, bool is_restart
     H2Advection(pin, is_restart);
   } else if (pgen_fun_name.compare("GOW17_uniform") == 0) {
     GOW17Uniform(pin, is_restart);
+  } else if (pgen_fun_name.compare("GOW17_turb") == 0) {
+    GOW17Turb(pin, is_restart);
+  } else if (pgen_fun_name.compare("GOW17_read_vtk") == 0) {
+    GOW17ReadVTK(pin, is_restart);
   } else if (pgen_fun_name.compare("gravity") == 0) {
     SelfGravity(pin, is_restart);
   } else if (pgen_fun_name.compare("binary_gravity") == 0) {
