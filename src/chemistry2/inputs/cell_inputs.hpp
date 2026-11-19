@@ -21,8 +21,9 @@
 namespace chemistry2 {
 
 struct CellInputs {
-  Real g0;     // FUV field [Draine 1978 units]
-  Real xi_cr;  // cosmic-ray ionization rate per H [s^-1]
+  Real g0;      // FUV field [Draine 1978 units]
+  Real xi_cr;   // cosmic-ray ionization rate per H [s^-1]
+  Real grad_v;  // |grad v| for the LVG escape of CO lines [s^-1]
 };
 
 struct InputSource {
@@ -36,7 +37,7 @@ struct InputSource {
   }
 
   KOKKOS_INLINE_FUNCTION CellInputs Load(int, int, int, int) const {
-    return CellInputs{g0, xi_cr};
+    return CellInputs{g0, xi_cr, 0.0};
   }
 };
 

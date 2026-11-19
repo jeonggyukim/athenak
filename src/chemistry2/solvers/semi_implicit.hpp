@@ -27,6 +27,7 @@
 
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 #include "athena.hpp"
@@ -142,9 +143,23 @@ class SemiImplicit {
   KOKKOS_INLINE_FUNCTION static void UpdateSpecies(Real *y, const Real *y_n, const Real e,
                                                    const Cell &cell, const Substep &sub,
                                                    const Real h) {
-    const CD r = Network::template Rates<K>(y, e, cell, sub);
-    y[K] = (y_n[K] + h*r.c)/(1.0 + h*r.d);
+    if constexpr (HasCustomUpdate<Network, K>()) {
+      Network::template Update<K>(y, y_n, e, cell, sub, h);
+    } else {
+      const CD r = Network::template Rates<K>(y, e, cell, sub);
+      y[K] = (y_n[K] + h*r.c)/(1.0 + h*r.d);
+    }
   }
+
+  //! A network marks an entry of UpdateOrder whose update is its own (a block such as
+  //! CO/HCO+) with `template <int K> static constexpr bool CUSTOM_UPDATE`.
+  template <class N, int K, class = void>
+  struct CustomUpdateTrait : std::false_type {};
+  template <class N, int K>
+  struct CustomUpdateTrait<N, K, std::void_t<decltype(N::template CUSTOM_UPDATE<K>)>>
+      : std::bool_constant<N::template CUSTOM_UPDATE<K>> {};
+  template <class N, int K>
+  static constexpr bool HasCustomUpdate() { return CustomUpdateTrait<N, K>::value; }
 };
 
 }  // namespace chemistry2

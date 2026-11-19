@@ -13,6 +13,7 @@
 
 #include "athena.hpp"
 #include "chemistry/chemistry.hpp"
+#include "chemistry2/chemistry2.hpp"
 #include "coordinates/cell_locations.hpp"
 #include "eos/eos.hpp"
 #include "hydro/hydro.hpp"
@@ -46,7 +47,7 @@ void ProblemGenerator::GOW17Uniform(ParameterInput* pin, const bool restart) {
   const Real n_H = pin->GetReal("problem", "n_H");
   const Real iso_cs = pin->GetReal("hydro", "iso_sound_speed");
   HydPrim1D hydro;
-  hydro.d = n_H * pmbp->punit->hydrogen_mass_cgs * pmbp->pchemistry->mu_H /
+  hydro.d = n_H * pmbp->punit->hydrogen_mass_cgs * chemistry2::ChemistryMuH(pmbp) /
             pmbp->punit->density_cgs();
   hydro.vx = pin->GetOrAddReal("problem", "vx_kms", 0.0);
   hydro.vy = 0.0;
@@ -73,7 +74,8 @@ void ProblemGenerator::GOW17Uniform(ParameterInput* pin, const bool restart) {
   auto initial_chemistry_d = initial_chemistry.view_device();
 
   // Assign values
-  const int chem_start = pmbp->pchemistry->get_chemistry_scalars_first_idx();
+  // chemistry2's GOW17 stores the same species in the same order
+  const int chem_start = chemistry2::ChemistryScalarStart(pmbp);
   par_for(
       "pgen_GOW17_hydro", DevExeSpace(), 0, (pmbp->nmb_thispack - 1), ks, ke,
       js, je, is, ie, KOKKOS_LAMBDA(int m, int k, int j, int i) {
