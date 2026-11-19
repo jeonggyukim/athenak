@@ -25,8 +25,10 @@ struct UnitFactors {
 };
 
 //! From the code units in cgs and the mean mass per H in units of m_H
-inline UnitFactors MakeUnitFactors(const Real density_cgs, const Real time_cgs,
-                                   const Real energy_cgs, const Real mu_h) {
+KOKKOS_INLINE_FUNCTION UnitFactors MakeUnitFactors(const Real density_cgs,
+                                                   const Real time_cgs,
+                                                   const Real energy_cgs,
+                                                   const Real mu_h) {
   const Real nh_per_density = density_cgs/(mu_h*units::Units::hydrogen_mass_cgs);
   return UnitFactors{nh_per_density, 1.0/nh_per_density, time_cgs, energy_cgs,
                      1.0/energy_cgs};

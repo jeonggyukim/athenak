@@ -32,6 +32,7 @@
 #include "units/units.hpp"
 #include "meshblock_pack.hpp"
 #include "chemistry/chemistry.hpp"
+#include "chemistry2/chemistry2.hpp"
 #include "gravity/gravity.hpp"
 
 //----------------------------------------------------------------------------------------
@@ -55,6 +56,7 @@ MeshBlockPack::MeshBlockPack(Mesh *pm, int igids, int igide) :
 
 MeshBlockPack::~MeshBlockPack() {
   if (pchemistry  != nullptr) {delete pchemistry;}
+  if (pchemistry2 != nullptr) {delete pchemistry2;}
   if (ppart  != nullptr) {delete ppart;}
   if (pnr    != nullptr) {delete pnr;}
   if (pdyngr != nullptr) {delete pdyngr;}
@@ -250,6 +252,13 @@ void MeshBlockPack::AddPhysics(ParameterInput *pin) {
     nphysics++;
   } else {
     pchemistry = nullptr;
+  }
+  if (pin->DoesBlockExist("chemistry2")) {
+    pchemistry2 = new chemistry2::Chemistry2(this, pin);
+    pchemistry2->AssembleTasks(tl_map);
+    nphysics++;
+  } else {
+    pchemistry2 = nullptr;
   }
 
   // (9) GRAVITY

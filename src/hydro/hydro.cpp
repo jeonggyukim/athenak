@@ -22,6 +22,7 @@
 #include "bvals/bvals.hpp"
 #include "hydro/hydro.hpp"
 #include "chemistry/chemistry.hpp"
+#include "chemistry2/chemistry2.hpp"
 
 namespace hydro {
 //----------------------------------------------------------------------------------------
@@ -78,6 +79,9 @@ Hydro::Hydro(MeshBlockPack *ppack, ParameterInput *pin) :
   // Add more passive scalars to be used for chemistry
   if (pin->DoesBlockExist("chemistry")) {
     nscalars += chemistry::Chemistry::SetupGetNumChemistryScalars(ppack, pin, nscalars);
+  }
+  if (pin->DoesBlockExist("chemistry2")) {
+    nscalars += chemistry2::Chemistry2::NumScalars(pin);
   }
 
   // Viscosity (if requested in input file)

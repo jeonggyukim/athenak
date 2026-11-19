@@ -36,6 +36,7 @@ namespace adm {class ADM;}
 namespace particles {class Particles;}
 namespace units {class Units;}
 namespace chemistry {class Chemistry;}
+namespace chemistry2 {class Chemistry2;}
 namespace gravity {class Gravity;}
 
 //----------------------------------------------------------------------------------------
@@ -77,6 +78,7 @@ class MeshBlockPack {
   std::vector<z4c::CCE *> pz4c_cce;
   particles::Particles *ppart=nullptr;
   chemistry::Chemistry *pchemistry=nullptr;
+  chemistry2::Chemistry2 *pchemistry2=nullptr;
   gravity::Gravity *pgrav=nullptr;
 
 
