@@ -130,7 +130,7 @@ int main(int argc, char *argv[]) {
     report.ExpectNear(worst[k], 0.0, 0.0, 1e-10, std::string(names[k]) + " vs Tigris");
   }
   // measured 1.1e-4 (heating; eV 1.602e-12 vs 1.60218e-12 erg) and 1.26e-2 (cooling,
-  // O I and C I rate differences), 2026-11-20
+  // in the C II/C I/O I/CO/grain group), 2026-11-20
   report.ExpectNear(hc_err[0][2], 0.0, 0.0, 2e-4, "heating vs Tigris NCR, worst state");
   report.ExpectNear(hc_err[1][2], 0.0, 0.0, 2e-2, "cooling vs Tigris NCR, worst state");
   return report.ExitCode();
