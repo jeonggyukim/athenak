@@ -342,9 +342,22 @@ struct NCR {
     return (xdot > 0.0) ? frac/xdot : Kokkos::Experimental::infinity_v<Real>;
   }
 
-  //! de/dt in code units: the heating and cooling terms shared with GOW17
+  //! Heating and cooling rates [erg s^-1 per H]
+  struct HeatCool {
+    Real heating, cooling;
+  };
+
+  //! de/dt in code units
   KOKKOS_INLINE_FUNCTION static Real Edot(const Real *y, const Real e, const Cell &c,
                                           const Substep &sub) {
+    const HeatCool hc = HeatingCooling(y, e, c, sub);
+    return c.u_time*((hc.heating - hc.cooling)*c.n_h*c.inv_u_energy);
+  }
+
+  //! The heating and cooling terms shared with GOW17
+  KOKKOS_INLINE_FUNCTION static HeatCool HeatingCooling(const Real *y, const Real e,
+                                                        const Cell &c,
+                                                        const Substep &sub) {
     const Real T = Kokkos::fmax(Temperature(y, e, c), 1.0);
     const Real n_h = c.n_h, x_e = y[IE], x_h2 = y[IH2], x_hi = sub.x_hi;
     const Real n_hi = n_h*x_hi, n_h2 = n_h*x_h2, n_e = n_h*x_e;
@@ -375,7 +388,7 @@ struct NCR {
     if (c.s.dust_cooling) {
       cooling += dust::GasToDust(n_h, T, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
     }
-    return c.u_time*((heating - cooling)*n_h*c.inv_u_energy);
+    return HeatCool{heating, cooling};
   }
 
   KOKKOS_INLINE_FUNCTION static void Closures(Real *, const Real *, const Cell &) {}

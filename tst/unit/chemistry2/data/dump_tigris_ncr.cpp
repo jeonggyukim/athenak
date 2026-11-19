@@ -45,7 +45,8 @@ int main() {
   r.Init(pin);
   std::mt19937_64 rng(41);
   std::uniform_real_distribution<double> u(0.0, 1.0);
-  std::printf("# n_H T x_H2 x_H+ x_e G xi_CR | C_H2 D_H2 C_H+ D_H+ x_e_new x_C+ x_CO\n");
+  std::printf("# n_H T x_H2 x_H+ x_e G xi_CR | C_H2 D_H2 C_H+ D_H+ x_e_new x_C+ x_CO "
+              "heating cooling [erg s^-1 per H]\n");
   for (int n = 0; n < 500; ++n) {
     NCRVar v{};
     v.nH = std::pow(10.0, -2.0 + 6.0*u(rng));
@@ -67,9 +68,13 @@ int main() {
                                                  v.chi_fuv, v.chi_ci, &x_cii);
     const Real x_co = r.CalculateCOAbundance(v.x_h2, x_cii, v.x_hii*3.2e-4, v.nH, v.z_d,
                                              v.z_g, v.xi_cr, v.chi_co);
+    v.dvdr = 0.0;
+    v.shld_len = 0.0;
+    Real cool, heat, td;
+    r.EvaluateThermal(v, v.temp, 10.0, cool, heat, td);
     std::printf("%.17e %.17e %.17e %.17e %.17e %.17e %.17e %.17e %.17e %.17e %.17e "
-                "%.17e %.17e %.17e\n", v.nH, v.temp, v.x_h2, v.x_hii, v.x_e, G, v.xi_cr,
-                c_h2, d_h2, c_hii, d_hii, x_e_new, x_cii, x_co);
+                "%.17e %.17e %.17e %.17e %.17e\n", v.nH, v.temp, v.x_h2, v.x_hii, v.x_e,
+                G, v.xi_cr, c_h2, d_h2, c_hii, d_hii, x_e_new, x_cii, x_co, heat, cool);
   }
   return 0;
 }
