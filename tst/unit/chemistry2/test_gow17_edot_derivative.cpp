@@ -61,6 +61,7 @@ int main(int argc, char *argv[]) {
                    U_ENERGY;
     const chemistry2::UnitFactors uf = chemistry2::MakeUnitFactors(
         n_h*MU_H*units::Units::hydrogen_mass_cgs, U_TIME, U_ENERGY, MU_H);
+    st.dust_cooling = (n % 2 == 1);  // half the states with gas-dust exchange
     const Net::Cell c = Net::MakeCell(1.0, GAMMA, st, uf,
                                       chemistry2::CellInputs{g0, xi, 0.0});
     const Real h = 1.0e-7;
