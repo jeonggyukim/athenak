@@ -268,8 +268,9 @@ class Thermo {
                                                 const Real k_xH2_photo,
                                                 const H2GeffRateCoefficientsT<S>& g) {
     const Real A = 2.0e-7;
+    // 1e-300: finite in fully ionized gas (x_HI = x_H2 = 0), where the factor is 0
     const S ncr =
-        (A + k_xH2_photo) / (g.geff_H * xHI + g.geff_H2 * xH2);
+        (A + k_xH2_photo) / (g.geff_H * xHI + g.geff_H2 * xH2 + 1.0e-300);
     return 1. / (1. + ncr / nH);
   }
 

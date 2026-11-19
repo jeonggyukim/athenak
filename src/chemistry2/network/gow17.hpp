@@ -279,7 +279,12 @@ struct GOW17Network {
     const auto hc = HeatCoolTable<dual::Dual>(y, T, seed, c, sub);
     const Real fac = c.u_time*c.n_h*c.inv_u_energy;
     *dedot_de = fac*(hc.heating.d - hc.cooling.d)*dT_de;
-    return fac*(hc.heating.v - hc.cooling.v);
+    const Real edot = fac*(hc.heating.v - hc.cooling.v);
+    // Below t_min_rates the rates are frozen at t_min_rates and the derivative is 0, so
+    // net cooling would shrink e geometrically, one substep each, up to nsub_max: no
+    // cooling below the rate floor
+    if (seed == 0.0 && edot < 0.0) return 0.0;
+    return edot;
   }
 
   template <class S>
