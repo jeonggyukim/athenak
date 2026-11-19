@@ -4,7 +4,8 @@ semi-implicit solver under <chemistry> and under <chemistry2> from the same inpu
 give the same primitive variables at every output.
 
 The two modules differ only in rounding (chemistry2 multiplies by inverse unit factors);
-measured 2.8e-16 (uniform) and 9.8e-14 (advection) relative to t = 5 Myr, 2026-11-19.
+measured 1.3e-15 (uniform) and 1.7e-13 (advection) relative to t = 5 Myr, 2026-11-20
+(chemistry2 integrates each step from 0, src/chemistry from the mesh time).
 """
 
 import glob

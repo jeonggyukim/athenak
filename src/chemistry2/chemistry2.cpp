@@ -16,6 +16,7 @@
 #include "athena.hpp"
 #include "chemistry/chemistry.hpp"
 #include "chemistry2/registry.hpp"
+#include "eos/eos.hpp"
 #include "hydro/hydro.hpp"
 #include "mesh/mesh.hpp"
 #include "mhd/mhd.hpp"
@@ -69,11 +70,15 @@ Chemistry2::Chemistry2(MeshBlockPack *ppack, ParameterInput *pin)
   if (pin->DoesBlockExist("chemistry")) {
     Fatal("<chemistry> and <chemistry2> cannot both be used");
   }
+  // The update evolves the internal energy w0(IEN), which only an ideal EOS has
+  const bool ideal = is_mhd_ ? ppack->pmhd->peos->eos_data.is_ideal
+                             : ppack->phydro->peos->eos_data.is_ideal;
+  if (!ideal) Fatal("needs an ideal equation of state");
 }
 
 int Chemistry2::NumScalars(ParameterInput *pin) {
   const std::string net = pin->GetString("chemistry2", "network");
-  const int n = NumSpecies(net);
+  const int n = SpeciesCount(net);
   if (n < 0) Fatal("<chemistry2> network = " + net + " is not built; available: " +
                    List());
   return n;
@@ -89,9 +94,10 @@ std::string Chemistry2::SpeciesName(const int n) const {
 }
 
 TaskStatus Chemistry2::UpdateTask(Driver *pdrive, int stage) {
-  const Real t = pmy_pack_->pmesh->time;
+  // The networks do not depend on t; integrating from 0 keeps the substep clock exact
+  // when t is large compared with the substeps.
   const Real dt = pmy_pack_->pmesh->dt;
-  Dispatch(active_, [&](auto pair) { Update<decltype(pair)>(t, dt); });
+  Dispatch(active_, [&](auto pair) { Update<decltype(pair)>(0.0, dt); });
   return TaskStatus::complete;
 }
 
