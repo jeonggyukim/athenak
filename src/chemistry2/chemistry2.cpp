@@ -98,6 +98,10 @@ std::string Chemistry2::SpeciesName(const int n) const {
   return name;
 }
 
+void Chemistry2::Advance(const Real dt) {
+  Dispatch(active_, [&](auto pair) { Update<decltype(pair)>(0.0, dt); });
+}
+
 TaskStatus Chemistry2::UpdateTask(Driver *pdrive, int stage) {
   // The networks do not depend on t; integrating from 0 keeps the substep clock exact
   // when t is large compared with the substeps.

@@ -301,6 +301,12 @@ Hydro::Hydro(MeshBlockPack *ppack, ParameterInput *pin) :
       Kokkos::realloc(uflx.x2f, nmb, (nhydro+nscalars), ncells3, ncells2, ncells1);
       Kokkos::realloc(uflx.x3f, nmb, (nhydro+nscalars), ncells3, ncells2, ncells1);
 
+      // allocate array of flags used with FOFC
+      if (use_fofc) {
+        Kokkos::realloc(fofc,  nmb, ncells3, ncells2, ncells1);
+        Kokkos::realloc(utest, nmb, nhydro, ncells3, ncells2, ncells1);
+      }
+
       // allocate global per-face L/R buffers for the split-kernel flux path.
       // Indexed by the GLOBAL cell/face index (m,n,k,j,i), so sized to the full
       // cell range (including ghost zones) in every dimension.

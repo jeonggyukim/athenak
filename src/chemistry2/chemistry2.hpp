@@ -62,6 +62,9 @@ class Chemistry2 {
   //! Advance the chemistry of every cell of the pack over dt with one registered pair
   template <class Pair>
   void Update(Real t, Real dt);
+  //! Advance the chemistry of every cell over dt with the active pair (outside the task
+  //! list, e.g. to equilibrate an initial state)
+  void Advance(Real dt);
 
   TaskStatus UpdateTask(Driver *pdrive, int stage);
   TaskStatus PrimToCons(Driver *pdrive, int stage);
