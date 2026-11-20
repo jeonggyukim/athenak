@@ -8,9 +8,9 @@
 //!        ported from Tigris (src/pgen/radiative_snr.cpp, the run without particles).
 //!
 //!        The ambient medium is uniform at rest (n_H nH_0, pressure pgas_0 in k_B K
-//!        cm^-3), with the chemical network's ambient abundances, advanced by the
-//!        chemistry alone for n_equilibrate steps of dt_equilibrate so that chemistry and
-//!        temperature settle. The supernova is injected once at t = 0 at the origin by
+//!        cm^-3), with the chemical network's ambient abundances, then solved to
+//!        chemical and thermal equilibrium cell by cell (Chemistry2::Equilibrate).
+//!        The supernova is injected once at t = 0 at the origin by
 //!        the Tigris Subcell scheme (src/feedback/subcell_scheme.cpp, injection.cpp):
 //!        N_sc^3 subcells per cell out to rfb_res cells, a linear taper of width half a
 //!        subcell at the edge, mass M_ej and energy E_SN spread over the same weighted
@@ -282,11 +282,19 @@ void ProblemGenerator::RadiativeSNR(ParameterInput *pin, const bool restart) {
     for (int n = 0; n < nspec; ++n) w0(m, s0 + n, k, j, i) = amb_d(n);
   });
 
-  // chemistry and temperature of the ambient gas: the chemistry alone at fixed density
-  const int n_eq = pin->GetOrAddInteger("problem", "n_equilibrate", 0);
-  const Real dt_eq = pin->GetOrAddReal("problem", "dt_equilibrate", 0.1);
-  if (chem) {
-    for (int s = 0; s < n_eq; ++s) pmbp->pchemistry2->Advance(dt_eq);
+  // chemistry and temperature of the ambient gas: each cell solved to equilibrium at
+  // fixed density
+  if (chem && pin->GetOrAddBoolean("problem", "equil", true)) {
+    const chemistry2::EquilibriumSettings q{
+        pin->GetOrAddReal("problem", "dt_max_equil", 1.0e5),
+        pin->GetOrAddInteger("problem", "nsub_max_equil", 2000),
+        pin->GetOrAddReal("problem", "tol_equil", 1.0e-6), false};
+    const chemistry2::EquilibriumStats st = pmbp->pchemistry2->Equilibrate(q);
+    if (global_variable::my_rank == 0) {
+      std::cout << "radiative_snr: ambient gas in equilibrium after at most "
+                << st.max_substeps << " substeps; " << st.not_converged
+                << " cells not converged" << std::endl;
+    }
   }
   pmbp->phydro->peos->PrimToCons(w0, u0, 0, n1 - 1, 0, n2 - 1, 0, n3 - 1);
 
