@@ -1265,8 +1265,10 @@ class GOW17Network {
           ln10_ * (3.0 - 0.416 * logT4coll - 0.327 * logT4coll * logT4coll));
       ncrH2 = Kokkos::exp(
           ln10_ * (4.845 - 1.3 * logT4coll + 1.62 * logT4coll * logT4coll));
+      // Glover & Mac Low (2007) eq. 27 counts H2 by H nuclei (their x_H2 = 2 n_H2/n);
+      // y_in[IH2] is n_H2/n_H, so the H2 term carries a factor 2
       div_ncr =
-          ghosts.H / (ncrH + small_real) + y_in[IH2] / (ncrH2 + small_real);
+          ghosts.H / (ncrH + small_real) + 2.0 * y_in[IH2] / (ncrH2 + small_real);
       if (div_ncr < small_real) {
         ncr = 1. / small_real;
       } else {

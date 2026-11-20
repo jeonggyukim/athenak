@@ -44,6 +44,7 @@ class Units {
 
   // PHYSICAL CONSTANTS
   static constexpr Real k_boltzmann_cgs = 1.3806488e-16;          // erg/k
+  static constexpr Real electron_volt_cgs = 1.602176634e-12;      // erg
   static constexpr Real grav_constant_cgs = 6.67408e-8;           // cm^3/(g*s^2)
   static constexpr Real speed_of_light_cgs = 2.99792458e10;       // cm/s
   static constexpr Real rad_constant_cgs = 7.56573325e-15;        // erg/(cm^3*K^4)

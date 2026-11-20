@@ -498,13 +498,14 @@ class Thermo {
     k.k10HI = 3.57e-10 * Kokkos::pow(T2, 0.419 - 0.003 * lnT2);
     k.k20HI = 3.19e-10 * Kokkos::pow(T2, 0.369 - 0.006 * lnT2);
     k.k21HI = 4.34e-10 * Kokkos::pow(T2, 0.755 - 0.160 * lnT2);
-    // H2, ortho and para combined
-    k.k10H2 = 1.49e-10 * Kokkos::pow(T2, 0.264 + 0.025 * lnT2) * fp_ +
-              1.37e-10 * Kokkos::pow(T2, 0.296 + 0.043 * lnT2) * fo_;
-    k.k20H2 = 1.90e-10 * Kokkos::pow(T2, 0.203 + 0.041 * lnT2) * fp_ +
-              2.23e-10 * Kokkos::pow(T2, 0.237 + 0.058 * lnT2) * fo_;
-    k.k21H2 = 2.10e-12 * Kokkos::pow(T2, 0.889 + 0.043 * lnT2) * fp_ +
-              3.00e-12 * Kokkos::pow(T2, 1.198 + 0.525 * lnT2) * fo_;
+    // H2, ortho and para combined: Draine (2011) Table F.6 entries 23-28 as corrected in
+    // the book's errata (errata_p1, noted 2015.08.24)
+    k.k10H2 = 1.49e-10 * Kokkos::pow(T2, 0.369 - 0.026 * lnT2) * fp_ +
+              1.37e-10 * Kokkos::pow(T2, 0.395 - 0.005 * lnT2) * fo_;
+    k.k20H2 = 2.37e-10 * Kokkos::pow(T2, 0.255 + 0.016 * lnT2) * fp_ +
+              2.23e-10 * Kokkos::pow(T2, 0.284 + 0.035 * lnT2) * fo_;
+    k.k21H2 = 2.10e-12 * Kokkos::pow(T2, 1.117 + 0.070 * lnT2) * fp_ +
+              3.00e-12 * Kokkos::pow(T2, 0.792 + 0.188 * lnT2) * fo_;
     // e, fit from Bell+1998
     k.k10e = 5.12e-10 * Kokkos::pow(T, -0.075);
     k.k20e = 4.86e-10 * Kokkos::pow(T, -0.026);

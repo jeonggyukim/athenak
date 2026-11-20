@@ -21,9 +21,9 @@ cfl_dependence_rtol = {"kokkos_BDF": 5e-3, "semi_implicit": 2e-2}
 # other solvers take a different number of cycles
 time_series_ode_solvers = ["kokkos_BDF"]
 
-# These come from Athena++ at t=1e6. Equilibrium is reached somewhere around t=1e2 or 1e3
-# but we're running the test longer to let any potential small errors compound into
-# something easier to detect.
+# Final state at t=1e4 from AthenaK with the kokkos_BDF solver. Equilibrium is reached
+# somewhere around t=1e2 or 1e3 but we're running the test longer to let any potential
+# small errors compound into something easier to detect.
 fiducial_data = {
     "time": 1e4,
     "cycle": 28,
@@ -31,19 +31,19 @@ fiducial_data = {
     "velx": 0.00000e00,
     "vely": 0.00000e00,
     "velz": 0.00000e00,
-    "eint": 28.234391212463375,  # derived from pressure = 18.822927474975586
-    "s_00_chem_He+": 4.4769834062208247e-07,
-    "s_01_chem_OHx": 1.4335562809719704e-05,
-    "s_02_chem_CHx": 6.079905467970548e-09,
-    "s_03_chem_CO": 0.00013345545448828489,
-    "s_04_chem_C+": 3.4978197049895243e-07,
-    "s_05_chem_HCO+": 6.033158683749207e-08,
-    "s_06_chem_H2": 0.44989413022994995,
-    "s_07_chem_H+": 2.9430591439449927e-06,
-    "s_08_chem_H3+": 1.2544340961540001e-06,
-    "s_09_chem_H2+": 1.969339358254274e-09,
-    "s_10_chem_O+": 8.677133317425145e-11,
-    "s_11_chem_Si+": 6.625605806220847e-07,
+    "eint": 28.29541428953726,
+    "s_00_chem_He+": 4.475383711262135e-07,
+    "s_01_chem_OHx": 1.4357907269894265e-05,
+    "s_02_chem_CHx": 6.077103531318066e-09,
+    "s_03_chem_CO": 0.00013348201394480758,
+    "s_04_chem_C+": 3.496788556628474e-07,
+    "s_05_chem_HCO+": 6.04949597120352e-08,
+    "s_06_chem_H2": 0.4499267321605884,
+    "s_07_chem_H+": 2.9411085058445926e-06,
+    "s_08_chem_H3+": 1.2558003104009102e-06,
+    "s_09_chem_H2+": 1.9692255218135295e-09,
+    "s_10_chem_O+": 8.680495137179886e-11,
+    "s_11_chem_Si+": 6.625920155634519e-07,
 }
 
 

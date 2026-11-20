@@ -85,9 +85,9 @@ int main(int argc, char *argv[]) {
       const Real x_hi = s.x_hi, nn_hi = n_h*x_hi, nn_h2 = n_h*x_h2, nn_e = n_h*x_e;
       const Real g_hi = (T > 3.0e3 ? Th::CoolingLya(x_hi, nn_e, T) : 0.0) +
                         Th::CoolingHIion(x_hi, x_e, s.k_coll_hi*n_h);
-      const Real g_h2 = chemistry2::ncr_terms::CoolingH2Moseley(x_h2, x_hi, n_h, T) +
+      const Real g_h2 = chemistry2::h2_moseley::Cooling(x_h2, x_hi, n_h, T) +
                         Th::CoolingH2diss(x_hi, x_h2, s.k_h2_h*n_h, s.k_h2_h2*n_h);
-      const Real g_hii = chemistry2::ncr_terms::CoolingHII(
+      const Real g_hii = chemistry2::ionized::CoolingHII(
           x_e, x_hii, n_h, T, chemistry2::ncr::AlphaBHII(T));
       const Real vth = std::sqrt(2.*units::Units::k_boltzmann_cgs*T/
                                  units::Units::CO_mass_cgs);
@@ -97,7 +97,7 @@ int main(int argc, char *argv[]) {
                          (s.x_co > 0 ? Th::CoolingCOR(s.x_co, nn_hi, nn_h2, nn_e, T,
                                                       n_h*s.x_co/(vth/3.086e20)) : 0.0) +
                          Th::CoolingRec(1.0, T, nn_e, g) +
-                         chemistry2::ncr_terms::CoolingNebular(x_e, x_hii, n_h, T, 1.0);
+                         chemistry2::ionized::CoolingNebular(x_e, x_hii, n_h, T, 1.0);
       const Real got_g[4] = {g_hi, g_hii, g_h2, g_oth};
       for (int k = 0; k < 4; ++k) {
         if (grp_ref[k] > 1e-3*cool_ref) grp[k].push_back(Rel(got_g[k], grp_ref[k]));

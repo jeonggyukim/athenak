@@ -330,13 +330,14 @@ class Thermo {
     const Real k10HI = 3.57e-10 * Kokkos::exp((0.419 - 0.003 * lnT2) * lnT2);
     const Real k20HI = 3.19e-10 * Kokkos::exp((0.369 - 0.006 * lnT2) * lnT2);
     const Real k21HI = 4.34e-10 * Kokkos::exp((0.755 - 0.160 * lnT2) * lnT2);
-    // H2
-    const Real k10H2p = 1.49e-10 * Kokkos::exp((0.264 + 0.025 * lnT2) * lnT2);
-    const Real k10H2o = 1.37e-10 * Kokkos::exp((0.296 + 0.043 * lnT2) * lnT2);
-    const Real k20H2p = 1.90e-10 * Kokkos::exp((0.203 + 0.041 * lnT2) * lnT2);
-    const Real k20H2o = 2.23e-10 * Kokkos::exp((0.237 + 0.058 * lnT2) * lnT2);
-    const Real k21H2p = 2.10e-12 * Kokkos::exp((0.889 + 0.043 * lnT2) * lnT2);
-    const Real k21H2o = 3.00e-12 * Kokkos::exp((1.198 + 0.525 * lnT2) * lnT2);
+    // H2: Draine (2011) Table F.6 entries 23-28 as corrected in the book's errata
+    // (errata_p1, noted 2015.08.24)
+    const Real k10H2p = 1.49e-10 * Kokkos::exp((0.369 - 0.026 * lnT2) * lnT2);
+    const Real k10H2o = 1.37e-10 * Kokkos::exp((0.395 - 0.005 * lnT2) * lnT2);
+    const Real k20H2p = 2.37e-10 * Kokkos::exp((0.255 + 0.016 * lnT2) * lnT2);
+    const Real k20H2o = 2.23e-10 * Kokkos::exp((0.284 + 0.035 * lnT2) * lnT2);
+    const Real k21H2p = 2.10e-12 * Kokkos::exp((1.117 + 0.070 * lnT2) * lnT2);
+    const Real k21H2o = 3.00e-12 * Kokkos::exp((0.792 + 0.188 * lnT2) * lnT2);
     const Real k10H2 = k10H2p * fp_ + k10H2o * fo_;
     const Real k20H2 = k20H2p * fp_ + k20H2o * fo_;
     const Real k21H2 = k21H2p * fp_ + k21H2o * fo_;

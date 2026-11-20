@@ -227,3 +227,6 @@ endif()
 
 # enable include of header files with /src/ as root of path
 target_include_directories(athena PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# the source tree, for default paths to data files under inputs/ (chemistry2)
+target_compile_definitions(athena PRIVATE ATHENAK_SOURCE_DIR="${CMAKE_SOURCE_DIR}/")

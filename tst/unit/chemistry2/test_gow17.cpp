@@ -109,8 +109,10 @@ chemistry::GOW17Settings OldSettings() {
 
 New::Settings NewSettings() {
   const Real inf = Kokkos::Experimental::infinity_v<Real>;
-  return New::Settings{1.0, 0.1, 1.6e-4, 3.2e-4, 1.7e-6, 1.0, inf, inf, 1.0, 1.0e9,
-                       3.0e20, true, false};
+  New::Settings s{1.0, 0.1, 1.6e-4, 3.2e-4, 1.7e-6, 1.0, inf, inf, 1.0, 1.0e9,
+                  3.0e20, true, false};
+  s.he_coll_ion = false;  // not in src/chemistry
+  return s;
 }
 
 // The old network, built for one cell (1,1,1) of a uniform 3^3 block at rest

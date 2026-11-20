@@ -49,6 +49,7 @@ enum : int {
   I2_OP_H,        // O+ + *H -> H+ + *O
   I2_OP_H2_OH,    // O+ + H2 -> OH + *H
   I2_OP_H2,       // O+ + H2 -> *O + *H + *H
+  I2_HE_E,        // *He + *e -> He+ + 2 *e (Tigris; not in GOW17)
   N_2BODY
 };
 // Cosmic-ray reactions (s^-1, times xi_CR / 2e-16 s^-1 in units of the primary rate)
@@ -121,7 +122,7 @@ KOKKOS_INLINE_FUNCTION GOW17TemperatureRates::GOW17TemperatureRates(
       1.06e-5, 1.76e-9,  2.753e-14, 1.00,     1.00,          1.00,
       8.46e-7, 7.20e-15, 2.81e-11,  3.5e-11,  3.3e-13 * 0.3, 1.46e-10,
       1.99e-9, 1.00,     6.4e-10,   1.00,     1.00,          1.6e-9,
-      1.6e-9};
+      1.6e-9,  1.00};
   for (int i = 0; i < N_2BODY; ++i) k2[i] = base[i];
 
   const Real tp_m0190 = Kokkos::exp(-0.190*ln_T);
@@ -174,6 +175,7 @@ KOKKOS_INLINE_FUNCTION GOW17TemperatureRates::GOW17TemperatureRates(
   k2[I2_HP_O] *= (1.1e-11*Kokkos::exp(0.517*ln_T) + 4.0e-10*Kokkos::exp(6.69e-3*ln_T))*
                  Kokkos::exp(-227./T);
   k2[I2_OP_H] *= 4.99e-11*Kokkos::exp(0.405*ln_T) + 7.5e-10*Kokkos::exp(-0.458*ln_T);
+  k2[I2_HE_E] = 0.0;  // from the Voronov data: table column, or Prepare (analytic)
 
   // Collisional dissociation of H2 and ionization of H (Glover & Mac Low 2007)
   constexpr Real TEMP_COLL = 7.0e2;
@@ -275,9 +277,11 @@ KOKKOS_INLINE_FUNCTION GOW17Rates MakeGOW17Rates(const GOW17TemperatureRates &t,
   r.k2[I2_OP_H2_OH] *= fac_h2;
   r.k2[I2_OP_H2] *= fac_e;
 
-  // Collisional dissociation: density blend of the low- and high-density limits
+  // Collisional dissociation: density blend of the low- and high-density limits. Glover
+  // & Mac Low (2007) eq. 27 counts H2 by H nuclei (their x_H2 = 2 n_H2/n), so with
+  // x_h2 = n_H2/n_H the H2 term carries a factor 2
   if (t.coll_active && n_h > SMALL_REAL) {
-    const Real div_ncr = x_h/(t.ncr_h + SMALL_REAL) + x_h2/(t.ncr_h2 + SMALL_REAL);
+    const Real div_ncr = x_h/(t.ncr_h + SMALL_REAL) + 2.0*x_h2/(t.ncr_h2 + SMALL_REAL);
     const Real ncr = (div_ncr < SMALL_REAL) ? 1./SMALL_REAL : 1./div_ncr;
     const Real n2ncr = n_h/ncr;
     r.k2[I2_H2_H] = Kokkos::exp(LN10*(t.log10_k9h*n2ncr/(1. + n2ncr) +
