@@ -69,17 +69,24 @@ struct NCRNetwork {
     bool case_a = false;         // H+ recombination: case A instead of B (as Cloudy CIE)
     bool nebular = true;         // nebular line fit; off when ion ladders cool by line
     Real temp_hot0 = ncr::TEMP_HOT0;  // hot-gas window [temp_hot0, temp_hot1] [K]
-    hot::CIETable cie;           // CIE helium and metal cooling and electrons
+    hot::CIETable cie;           // CIE helium and metal terms (analytic path only; the
+                                 // table path reads them from ncr::C_CIE columns)
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
     Settings s = ReadValues(pin, b);
     s.temp_hot0 = pin->GetOrAddReal(b, "NCR_temp_hot0", ncr::TEMP_HOT0);
-    if constexpr (TABLE) s.table = ncr::BuildNCRTable();
     // the CIE table is read only when an NCR chemical network is the one selected
-    if (pin->GetOrAddString(b, "network", "").rfind("NCR", 0) == 0) {
-      s.cie = hot::ReadCIETable(pin->GetOrAddString(
+    const bool selected = pin->GetOrAddString(b, "network", "").rfind("NCR", 0) == 0;
+    hot::CIESource src;
+    if (selected) {
+      src = hot::ReadCIESource(pin->GetOrAddString(
           b, "cie_table", "inputs/chemistry2/cie/tigress_coolftn_ncr.txt"));
+    }
+    if constexpr (TABLE) {
+      s.table = ncr::BuildNCRTable(gow17::ROWS_PER_OCTAVE, selected ? &src : nullptr);
+    } else {
+      if (selected) s.cie = hot::MakeCIETable(src);
     }
     return s;
   }
@@ -131,6 +138,7 @@ struct NCRNetwork {
   struct TCoef {
     Real alpha_b, k_coll, alpha_cii, k_ch2p, kgr_fac;
     Real l9l, l9h, l10l, l10h, ncr_h2, ncr_hi, k1619;
+    Real xe_cie;  // CIE helium and metal electrons, xe_He + Z_g xe_metal
   };
 
   KOKKOS_INLINE_FUNCTION static TCoef Coefficients(const Real T, const Cell &c,
@@ -152,6 +160,8 @@ struct NCRNetwork {
       k.ncr_h2 = t.At(s, ncr::C_NCR_H2);
       k.ncr_hi = t.At(s, ncr::C_NCR_HI);
       k.k1619 = t.At(s, ncr::C_K1619);
+      k.xe_cie = t.At(s, ncr::C_CIE + hot::XE_HE) +
+                 c.s.zg*t.At(s, ncr::C_CIE + hot::XE_METAL);
     } else {
       k.alpha_b = c.s.case_a ? ncr::AlphaAHII(T) : ncr::AlphaBHII(T);
       k.k_coll = ncr::CollIonHI(T);
@@ -172,6 +182,12 @@ struct NCRNetwork {
       k.ncr_h2 = Kokkos::pow(10.0, 4.845 - 1.3*lt4 + 1.62*lt4*lt4);
       k.ncr_hi = Kokkos::pow(10.0, 3.0 - 0.416*lt4 - 0.327*lt4*lt4);
       k.k1619 = 1.0e-7*Kokkos::pow(T*1e-2, -0.5);
+      k.xe_cie = 0.0;
+      if (c.s.cie.n > 0 && T > c.s.temp_hot0) {
+        Real v[hot::NCOL];
+        c.s.cie.Eval(T, v);
+        k.xe_cie = v[hot::XE_HE] + c.s.zg*v[hot::XE_METAL];
+      }
     }
     return k;
   }
@@ -305,13 +321,7 @@ struct NCRNetwork {
     }
     const Real w = hot::Weight<Real>(T, c.s.temp_hot0, c.s.temp_hot1);
     const Real cold = x_cii + x_hii*ncr::X_O_STD*c.s.zg + XeMol(x_e_old, x_h2, c, tc);
-    Real cie = 0.0;
-    if (c.s.cie.n > 0) {
-      Real v[hot::CIETable::NCOL];
-      c.s.cie.Eval(T, v);
-      cie = v[hot::CIETable::XE_HE] + c.s.zg*v[hot::CIETable::XE_METAL];
-    }
-    return x_hii + (1.0 - w)*cold + w*cie;
+    return x_hii + (1.0 - w)*cold + w*tc.xe_cie;
   }
 
   //! Creation c [per H per code time] and destruction d [per code time]
@@ -428,24 +438,26 @@ struct NCRNetwork {
     cooling += ncr_terms::CoolingHII(x_e, y[IH_PLUS], n_h, T, ncr::AlphaBHII(T));
     cooling += Thermo::CoolingH2diss(x_hi, x_h2, sub.k_h2_h*n_h, sub.k_h2_h2*n_h);
     cooling += Thermo::CoolingHIion(x_hi, x_e, sub.k_coll_hi*n_h);
-    HotBlend<Real>(T, n_h, c, &heating, &other);
+    if (T > c.s.temp_hot0) {
+      Real lam = 0.0;
+      if (c.s.cie.n > 0) {
+        Real v[hot::NCOL];
+        c.s.cie.Eval(T, v);
+        lam = v[hot::LAMBDA_HE] + c.s.zg*v[hot::LAMBDA_METAL];
+      }
+      HotBlend<Real>(T, n_h*lam, c, &heating, &other);
+    }
     return HeatCool{heating, cooling + other};
   }
 
   //! Above temp_hot0: heating and the non-hydrogen cold-gas cooling times 1 - w, plus
-  //! w times the CIE helium and metal cooling [erg s^-1 per H]
+  //! w times the CIE helium and metal cooling cie [erg s^-1 per H]
   template <class S>
-  KOKKOS_INLINE_FUNCTION static void HotBlend(const S &T, const Real n_h, const Cell &c,
+  KOKKOS_INLINE_FUNCTION static void HotBlend(const S &T, const S &cie, const Cell &c,
                                               S *heating, S *other) {
     if (dual::Value(T) <= c.s.temp_hot0) return;
     const S w = hot::Weight<S>(T, c.s.temp_hot0, c.s.temp_hot1);
     *heating *= 1.0 - w;
-    S cie = 0.0;
-    if (c.s.cie.n > 0) {
-      S v[hot::CIETable::NCOL];
-      c.s.cie.Eval(T, v);
-      cie = n_h*(v[hot::CIETable::LAMBDA_HE] + c.s.zg*v[hot::CIETable::LAMBDA_METAL]);
-    }
     *other = (1.0 - w)*(*other) + w*cie;
   }
 
@@ -574,7 +586,11 @@ struct NCRNetwork {
     }
     cooling += Thermo::CoolingH2diss(x_hi, x_h2, k_h2_h, k_h2_h2);
     cooling += Thermo::CoolingHIion(x_hi, x_e, k_hi);
-    HotBlend<S>(Ts, n_h, c, &heating, &other);
+    if (T > c.s.temp_hot0) {
+      const S cie = n_h*(col(ncr::C_CIE + hot::LAMBDA_HE) +
+                         c.s.zg*col(ncr::C_CIE + hot::LAMBDA_METAL));
+      HotBlend<S>(Ts, cie, c, &heating, &other);
+    }
     return HeatCoolT<S>{heating, cooling + other};
   }
 

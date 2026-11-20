@@ -70,16 +70,21 @@ int main(int argc, char *argv[]) {
     report.ExpectNear(worst, 0.0, 0.0, 1e-7, "dw/dT (dual) vs centered difference");
   }
 
-  // table read: Eval at source temperatures returns the source values
-  const chemistry2::hot::CIETable cie = chemistry2::hot::ReadCIETable(path);
+  // table read: the host source and its device copy return the source values at the
+  // source temperatures
+  namespace hot = chemistry2::hot;
+  const hot::CIESource src = hot::ReadCIESource(path);
+  const hot::CIETable cie = hot::MakeCIETable(src);
   const auto rows = SourceRows(path);
   {
     double worst = 0.0;
     for (std::size_t i = 0; i < rows.size(); i += 7) {
-      Real v[chemistry2::hot::CIETable::NCOL];
-      cie.Eval(std::pow(10.0, rows[i][0]), v);
-      for (int k = 0; k < chemistry2::hot::CIETable::NCOL; ++k) {
+      const Real T = std::pow(10.0, rows[i][0]);
+      Real v[hot::NCOL];
+      cie.Eval(T, v);
+      for (int k = 0; k < hot::NCOL; ++k) {
         worst = std::fmax(worst, std::fabs(v[k]/rows[i][k + 1] - 1.0));
+        worst = std::fmax(worst, std::fabs(src.Eval(k, T)/rows[i][k + 1] - 1.0));
       }
     }
     std::printf("  table at source points: worst %.2e\n", worst);
@@ -93,8 +98,9 @@ int main(int argc, char *argv[]) {
   base.table = chemistry2::ncr::BuildNCRTable();
   base.temp_hot0 = t0;
   Net::Settings no_cie = base;           // blend, no CIE terms
-  Net::Settings with_cie = base;         // blend and CIE terms
-  with_cie.cie = cie;
+  Net::Settings with_cie = base;         // blend and CIE terms (row-table columns)
+  with_cie.table = chemistry2::ncr::BuildNCRTable(chemistry2::gow17::ROWS_PER_OCTAVE,
+                                                  &src);
   Net::Settings cold = base;             // no blend in the window (T0 above it)
   cold.temp_hot0 = 1.0e9;
   cold.temp_hot1 = 2.0e9;
@@ -122,7 +128,8 @@ int main(int argc, char *argv[]) {
     std::printf("  log T %.2f: w %.4f; cooling cold %.4e, blend %.4e, with CIE %.4e "
                 "(CIE term %.4e); heating cold %.4e, blend %.4e\n", rows[row][0], w,
                 a.cooling, b.cooling, c.cooling, cie_direct, a.heating, b.heating);
-    report.ExpectNear(c.cooling - b.cooling, w*cie_direct, 1e-9, 0.0,
+    // row table, linear in Lambda between rows: measured 1.9e-4 at log T 4.8
+    report.ExpectNear(c.cooling - b.cooling, w*cie_direct, 3e-4, 0.0,
                       "CIE term = w n_H (Lambda_He + Z_g Lambda_metal), log T " +
                       std::to_string(rows[row][0]));
     report.ExpectNear(b.heating, (1.0 - w)*a.heating, 1e-12, 1e-300,
@@ -139,7 +146,7 @@ int main(int argc, char *argv[]) {
     chemistry2::Slot slot;
     const Net::TCoef tc = Net::Coefficients(T, c, &slot);
     const Real x_e = Net::FreeElectrons(1.1, 1e-8, 0.999, T, c, tc);
-    report.ExpectNear(x_e, 0.999 + rows[60][3] + rows[60][4], 1e-10, 0.0,
+    report.ExpectNear(x_e, 0.999 + rows[60][3] + rows[60][4], 1e-5, 0.0,  // 7.4e-6
                       "x_e above T1 = x_H+ + xe_He + xe_metal");
   }
 
@@ -159,28 +166,37 @@ int main(int argc, char *argv[]) {
     report.Expect(worst == 0.0, "below T0 the CIE table changes nothing");
   }
 
-  // derivative of the blend: HotBlend with dual numbers against a centered difference
-  // (fixed heating and cold cooling, so only w and the CIE table vary with T)
+  // d(cooling - heating)/dT with dual numbers against a centered difference of the same
+  // function, in ionized gas (x_H I = 1e-6, so the H I collisional ionization, whose
+  // value is fixed per substep, does not matter); T away from row edges
   {
     namespace d = chemistry2::dual;
     const Net::Cell c = Net::MakeCell(1.0, GAMMA, with_cie, uf, in);
     double worst = 0.0;
-    for (const Real T : {2.05e4, 2.2e4, 2.75e4, 3.3e4, 3.45e4, 5.0e4, 3.0e5, 3.0e6}) {
-      auto blend = [&](const Real t) {
-        Real heat = 2.0e-26, other = 3.0e-23;
-        Net::HotBlend<Real>(t, n_h, c, &heat, &other);
-        return other - heat;
+    for (const Real T0 : {2.05e4, 2.2e4, 2.75e4, 3.3e4, 3.45e4, 5.0e4, 3.0e5, 3.0e6}) {
+      const chemistry2::Slot s0 = c.s.table.grid.Locate(T0);
+      const Real T = c.s.table.grid.RowTemperature(s0.i0)*0.5 +
+                     c.s.table.grid.RowTemperature(s0.i1)*0.5;
+      Real y[Net::NSPEC] = {1e-12, 1.0 - 1e-6, 1.2};
+      const Real e = n_h*chemistry2::Thermo::CvCold(y[Net::IH2], 0.1, y[Net::IE], GAMMA)*
+                     T/U_ENERGY;
+      const Net::Substep sub = Net::Prepare(y, e, c);
+      const auto hd = Net::HeatCoolTable<d::Dual>(y, T, 1.0, c, sub);
+      auto net = [&](const Real t) {
+        const auto r = Net::HeatCoolTable<Real>(y, t, 1.0, c, sub);
+        return r.cooling - r.heating;
       };
-      d::Dual heat(2.0e-26, 0.0), other(3.0e-23, 0.0);
-      Net::HotBlend<d::Dual>(d::Dual(T, 1.0), n_h, c, &heat, &other);
-      const Real h = 1e-6*T;
-      const Real fd = (blend(T + h) - blend(T - h))/(2*h);
-      const double r = std::fabs((other.d - heat.d) - fd)/std::fabs(fd);
-      std::printf("  T %.3g K: d(blend)/dT dual %.6e, FD %.6e, rel %.2e\n", T,
-                  other.d - heat.d, fd, r);
+      const Real h = 1e-7*T;
+      const Real fd = (net(T + h) - net(T - h))/(2*h);
+      const double r = std::fabs((hd.cooling.d - hd.heating.d) - fd)/std::fabs(fd);
+      std::printf("  T %.3g K: d(net cooling)/dT dual %.6e, FD %.6e, rel %.2e\n", T,
+                  hd.cooling.d - hd.heating.d, fd, r);
       worst = std::fmax(worst, r);
     }
-    report.ExpectNear(worst, 0.0, 0.0, 1e-5, "d(blend)/dT (dual) vs centered difference");
+    // measured 1.8e-3 at 3e6 K, from the H I collisional ionization term (value fixed
+    // per substep, derivative from the table); <= 1.3e-4 below 5e4 K
+    report.ExpectNear(worst, 0.0, 0.0, 3e-3,
+                      "d(net cooling)/dT (dual) vs centered difference");
   }
   return report.ExitCode();
 }

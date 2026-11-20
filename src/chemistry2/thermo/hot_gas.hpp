@@ -17,7 +17,13 @@
 //!        w is the quintic smootherstep s^3 (6 s^2 - 15 s + 10), s = (T - T0)/(T1 - T0)
 //!        clamped to [0, 1]: exactly 0 below T0 and 1 above T1, with first and second
 //!        derivatives zero at both ends.
+//!
+//!        CIESource holds the table on the host; a chemical network with a row table
+//!        evaluates it once per row at build time. CIETable is the device copy, for
+//!        paths without a row table.
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <sstream>
@@ -31,6 +37,8 @@
 namespace chemistry2 {
 namespace hot {
 
+enum : int {LAMBDA_HE = 0, LAMBDA_METAL, XE_HE, XE_METAL, NCOL};
+
 //! w(T) on [t0, t1]; with S = dual::Dual the derivative part carries dw/dT
 template <class S>
 KOKKOS_INLINE_FUNCTION S Weight(const S &T, const Real t0, const Real t1) {
@@ -41,14 +49,61 @@ KOKKOS_INLINE_FUNCTION S Weight(const S &T, const Real t0, const Real t1) {
   return s*s*s*(s*(6.0*s - 15.0) + 10.0);
 }
 
+//! The table on the host: ln of the NCOL columns, uniform in log10 T
+struct CIESource {
+  std::vector<std::array<Real, NCOL>> ln;
+  Real lt0 = 0.0, inv_dlt = 0.0;
+
+  //! Column k at T [K], linear in log10 T of its logarithm, held at the end rows
+  Real Eval(const int k, const Real T) const {
+    const int n = static_cast<int>(ln.size());
+    const Real u = std::fmin(std::fmax((std::log10(T) - lt0)*inv_dlt, 0.0),
+                             static_cast<Real>(n - 1));
+    const int i0 = std::min(static_cast<int>(u), n - 2);
+    const Real f = u - static_cast<Real>(i0);
+    return std::exp(ln[i0][k] + f*(ln[i0 + 1][k] - ln[i0][k]));
+  }
+};
+
+inline CIESource ReadCIESource(const std::string &path) {
+  std::ifstream f(path);
+  if (!f) throw std::runtime_error("hot::ReadCIESource: cannot open " + path);
+  CIESource src;
+  std::vector<Real> lt;
+  std::string line;
+  int header = 0;  // "nvar nx1", then "logT_min logT_max"
+  while (std::getline(f, line)) {
+    if (line.empty() || line[0] == '#') continue;
+    if (header < 2) {
+      ++header;
+      continue;
+    }
+    std::istringstream is(line);
+    Real v[6];
+    for (Real &x : v) {
+      if (!(is >> x)) {
+        throw std::runtime_error("hot::ReadCIESource: short row in " + path);
+      }
+    }
+    lt.push_back(v[0]);
+    src.ln.push_back({std::log(std::fmax(v[2], 1.0e-300)),
+                      std::log(std::fmax(v[3], 1.0e-300)),
+                      std::log(std::fmax(v[4], 1.0e-300)),
+                      std::log(std::fmax(v[5], 1.0e-300))});
+  }
+  if (lt.size() < 2) throw std::runtime_error("hot::ReadCIESource: no rows in " + path);
+  src.lt0 = lt[0];
+  src.inv_dlt = 1.0/(lt[1] - lt[0]);
+  return src;
+}
+
+//! Device copy of a CIESource
 struct CIETable {
-  enum : int {LAMBDA_HE = 0, LAMBDA_METAL, XE_HE, XE_METAL, NCOL};
-  DvceArray2D<Real> ln;  // (n, NCOL): ln of each column
+  DvceArray2D<Real> ln;  // (n, NCOL)
   Real lt0 = 0.0, inv_dlt = 0.0;
   int n = 0;
 
-  //! The NCOL values at T [K] (S = Real or dual::Dual), linear in log10 T of their
-  //! logarithms, held at the end rows outside the table
+  //! The NCOL values at T [K] (S = Real or dual::Dual), as CIESource::Eval
   template <class S>
   KOKKOS_INLINE_FUNCTION void Eval(const S &T, S *out) const {
     constexpr Real INV_LN10 = 0.434294481903251828;
@@ -72,37 +127,15 @@ struct CIETable {
   }
 };
 
-inline CIETable ReadCIETable(const std::string &path) {
-  std::ifstream f(path);
-  if (!f) throw std::runtime_error("hot::ReadCIETable: cannot open " + path);
-  std::vector<std::vector<Real>> rows;
-  std::string line;
-  int header = 0;  // "nvar nx1", then "logT_min logT_max"
-  while (std::getline(f, line)) {
-    if (line.empty() || line[0] == '#') continue;
-    std::istringstream is(line);
-    std::vector<Real> v;
-    Real x;
-    while (is >> x) v.push_back(x);
-    if (header < 2) {
-      ++header;
-      continue;
-    }
-    if (v.size() < 7) throw std::runtime_error("hot::ReadCIETable: short row in " + path);
-    rows.push_back(v);
-  }
-  if (rows.size() < 2) throw std::runtime_error("hot::ReadCIETable: no rows in " + path);
+inline CIETable MakeCIETable(const CIESource &src) {
   CIETable t;
-  t.n = static_cast<int>(rows.size());
-  t.lt0 = rows[0][0];
-  t.inv_dlt = 1.0/(rows[1][0] - rows[0][0]);
-  t.ln = DvceArray2D<Real>("chemistry2_hot_cie", t.n, CIETable::NCOL);
+  t.n = static_cast<int>(src.ln.size());
+  t.lt0 = src.lt0;
+  t.inv_dlt = src.inv_dlt;
+  t.ln = DvceArray2D<Real>("chemistry2_hot_cie", t.n, NCOL);
   auto h = Kokkos::create_mirror_view(t.ln);
-  constexpr int SRC[CIETable::NCOL] = {2, 3, 4, 5};  // Lambda_He, Lambda_metal, xe's
   for (int i = 0; i < t.n; ++i) {
-    for (int k = 0; k < CIETable::NCOL; ++k) {
-      h(i, k) = std::log(std::fmax(rows[i][SRC[k]], 1.0e-300));
-    }
+    for (int k = 0; k < NCOL; ++k) h(i, k) = src.ln[i][k];
   }
   Kokkos::deep_copy(t.ln, h);
   return t;
