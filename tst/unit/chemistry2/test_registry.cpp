@@ -33,9 +33,12 @@ int main(int argc, char *argv[]) {
   report.Expect(chemistry2::Find("GOW17_analytic", "semi_implicit") == 2,
                 "Find GOW17_analytic + semi_implicit");
   report.Expect(chemistry2::Find("GOW17", "kokkos_BDF") == 3, "Find GOW17 + kokkos_BDF");
+  report.Expect(chemistry2::Find("NCR_analytic", "semi_implicit") == 5,
+                "Find NCR_analytic + semi_implicit");
   report.Expect(chemistry2::List() == "H2 + semi_implicit, GOW17 + semi_implicit, "
                                       "GOW17_analytic + semi_implicit, "
                                       "GOW17 + kokkos_BDF, NCR + semi_implicit, "
+                                      "NCR_analytic + semi_implicit, "
                                       "NCR_oxygen + semi_implicit",
                 "List: " + chemistry2::List());
   report.Expect(chemistry2::SpeciesCount("GOW17") == 12 &&
