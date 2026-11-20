@@ -30,6 +30,7 @@ class Driver;
 
 namespace chemistry2 {
 
+// IDs of the tasks chemistry2 adds to the after_timeintegrator list
 struct Chemistry2TaskIDs {
   TaskID init_recv, update, prim_to_cons, restrict_u, send_u, recv_u, bcs, prolongate,
       cons_to_prim, csend, crecv;
@@ -46,6 +47,7 @@ struct NetworkSettings {
 
 class Chemistry2 {
  public:
+  //! Read <chemistry2> (network, ode_solver, settings, radiation inputs) and the units
   Chemistry2(MeshBlockPack *ppack, ParameterInput *pin);
 
   //! Number of passive scalars chemistry2 adds, from <chemistry2>/network
@@ -66,6 +68,8 @@ class Chemistry2 {
   //! list, e.g. to equilibrate an initial state)
   void Advance(Real dt);
 
+  // the tasks (chemistry2_tasks.cpp): the update over the hydro dt, then the
+  // conserved variables and the ghost-cell exchange
   TaskStatus UpdateTask(Driver *pdrive, int stage);
   TaskStatus PrimToCons(Driver *pdrive, int stage);
   TaskStatus InitRecv(Driver *pdrive, int stage);
@@ -83,15 +87,15 @@ class Chemistry2 {
  private:
   MeshBlockPack *const pmy_pack_;
   const bool is_mhd_;
-  const int nscalars_;
-  const int first_scalar_;
-  const Real mu_h_;
+  const int nscalars_;      // number of species (passive scalars) of the network
+  const int first_scalar_;  // index of the first species in w0/u0
+  const Real mu_h_;         // mean mass per H nucleus [m_H]
   const int active_;  // index of the (network, solver) pair in the registry
-  const UnitFactors units_;
+  const UnitFactors units_;  // code units <-> cgs, n_H per code density
   const SemiImplicitSettings semi_implicit_;
   const KokkosBDFSettings kokkos_bdf_;
   const NetworkSettings networks_;
-  const InputSource inputs_;
+  const InputSource inputs_;  // where the FUV field and CR rate of each cell come from
 };
 
 //! First chemistry scalar index and mu_H of whichever chemistry module exists, for the
