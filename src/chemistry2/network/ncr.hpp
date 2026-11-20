@@ -33,7 +33,8 @@
 #include "chemistry2/network/species_table.hpp"
 #include "chemistry2/thermo/dust.hpp"
 #include "chemistry2/thermo/hot_gas.hpp"
-#include "chemistry2/thermo/ncr_terms.hpp"
+#include "chemistry2/thermo/h2_cooling_moseley.hpp"
+#include "chemistry2/thermo/ionized.hpp"
 #include "chemistry2/thermo/thermo.hpp"
 #include "chemistry2/unit_factors.hpp"
 #include "units/units.hpp"
@@ -443,7 +444,7 @@ struct NCRNetwork {
       other += Thermo::CoolingCOR(sub.x_co, n_hi, n_h2, n_e, T, n_h*sub.x_co/grad_eff);
     }
     if (c.s.nebular && T < c.s.temp_hot1) {
-      other += ncr_terms::CoolingNebular(x_e, y[IH_PLUS], n_h, T, c.s.zg);
+      other += ionized::CoolingNebular(x_e, y[IH_PLUS], n_h, T, c.s.zg);
     }
     other += Thermo::CoolingRec(c.s.zd, T, n_e, c.chi);
     if (c.s.dust_cooling) {
@@ -452,9 +453,9 @@ struct NCRNetwork {
     Real cooling = 0.0;
     if (T > 3.0e3) cooling += Thermo::CoolingLya(x_hi, n_e, T);
     if (c.s.h2_rovib_cooling && T < c.s.temp_hot1) {
-      cooling += ncr_terms::CoolingH2Moseley(x_h2, x_hi, n_h, T);
+      cooling += h2_moseley::Cooling(x_h2, x_hi, n_h, T);
     }
-    cooling += ncr_terms::CoolingHII(x_e, y[IH_PLUS], n_h, T, ncr::AlphaBHII(T));
+    cooling += ionized::CoolingHII(x_e, y[IH_PLUS], n_h, T, ncr::AlphaBHII(T));
     cooling += Thermo::CoolingH2diss(x_hi, x_h2, sub.k_h2_h*n_h, sub.k_h2_h2*n_h);
     cooling += Thermo::CoolingHIion(x_hi, x_e, sub.k_coll_hi*n_h);
     if (T > c.s.temp_hot0) {
@@ -576,17 +577,12 @@ struct NCRNetwork {
                                         col(gow17::C_LYA + 1));
     }
     if (c.s.h2_rovib_cooling && T < c.s.temp_hot1) {  // Moseley et al. (2021)
-      const Real x1 = n_hi + 5.0*n_h2, x2 = n_hi + 4.5*n_h2;
-      const Real x3 = n_hi + 0.75*n_h2, x4 = n_hi + 0.05*n_h2;
-      constexpr Real N1 = 50.0, N2 = 450.0, N3 = 25.0, N4 = 900.0;
-      const Real d1 = 0.7*x1/(1.0 + x1/N1) + 0.3*x1/(1.0 + x1/(10.0*N1));
-      const Real d2 = 0.35*x2/(1.0 + x2/N2) + 0.65*x2/(1.0 + x2/(10.0*N2));
-      const Real d3 = x3/(1.0 + x3/N3);
-      const Real d4 = 0.45*x4/(1.0 + x4/N4) + 0.55*x4/(1.0 + x4/(10.0*N4));
-      cooling += (col(ncr::C_MOS)*d1 + col(ncr::C_MOS + 1)*d2 + col(ncr::C_MOS + 2)*d3 +
-                  col(ncr::C_MOS + 3)*d4)*x_h2;
+      Real d[4];
+      h2_moseley::DensityFactors(n_hi, n_h2, d);
+      cooling += (col(ncr::C_MOS)*d[0] + col(ncr::C_MOS + 1)*d[1] +
+                  col(ncr::C_MOS + 2)*d[2] + col(ncr::C_MOS + 3)*d[3])*x_h2;
     }
-    cooling += (col(ncr::C_HII_FF) + col(ncr::C_HII_REC))*(n_h*x_e*x_hii);
+    cooling += (col(gow17::C_HII_FF) + col(gow17::C_HII_REC))*(n_h*x_e*x_hii);
     // collisional H2 dissociation and H ionization: values from Prepare, derivative
     // of their temperature dependence from the table
     S k_h2_h = sub.k_h2_h*n_h, k_h2_h2 = sub.k_h2_h2*n_h, k_hi = sub.k_coll_hi*n_h;

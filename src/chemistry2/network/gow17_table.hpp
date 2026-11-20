@@ -15,6 +15,7 @@
 #include "chemistry2/network/gow17_rates.hpp"
 #include "chemistry2/rates/row_table.hpp"
 #include "chemistry2/thermo/hot_gas.hpp"
+#include "chemistry2/thermo/ionized.hpp"
 #include "chemistry2/thermo/thermo.hpp"
 
 namespace chemistry2 {
@@ -38,7 +39,10 @@ enum : int {
   C_CIE = C_LYA + 2,                     // hot::NCOL CIE columns (Lambda_He,
                                          // Lambda_metal, xe_He, xe_metal); zero
                                          // without a CIE table
-  N_COLS = C_CIE + hot::NCOL
+  C_HII_FF = C_CIE + hot::NCOL,          // free-free factor g_ff sqrt(T4) 1.422e-25
+  C_HII_REC,                             // recombination energy times alpha_B
+                                         // [erg cm^3 s^-1]
+  N_COLS
 };
 
 // Every column holds the value and is interpolated linearly. At 64 rows per octave the
@@ -102,6 +106,8 @@ inline void FillRow(const Real T, const bool kgr_h2_const, Real *row) {
   v[C_LYA] = fac;
   v[C_LYA + 1] = fac*Kokkos::exp(-11.84/T4);
   for (int k = 0; k < hot::NCOL; ++k) v[C_CIE + k] = 0.0;  // FillCIE
+  v[C_HII_FF] = ionized::HIIFreeFreeFactor(T);
+  v[C_HII_REC] = ionized::HIIRecombinationEnergy(T)*tr.k2[I2_HP_E];
   for (int c = 0; c < N_COLS; ++c) row[c] = v[c];
 }
 

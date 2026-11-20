@@ -16,6 +16,7 @@
 #include "athena.hpp"
 #include "check.hpp"
 #include "chemistry2/network/gow17.hpp"
+#include "chemistry2/network/ncr_rates.hpp"
 
 namespace {
 using Net = chemistry2::GOW17;
@@ -148,6 +149,43 @@ int main(int argc, char *argv[]) {
       worst = std::fmax(worst, r);
     }
     report.ExpectNear(worst, 0.0, 0.0, 3e-3, "d(net cooling)/dT (dual) vs FD");
+  }
+
+  // H+ free-free and recombination cooling: on minus off equals NCR's CoolingHII with
+  // NCR's case B coefficient, in the same state, on both paths (hot branch off)
+  {
+    Net::Settings h_off = off, h_on = off;
+    h_on.hii_cooling = true;
+    using Ana = chemistry2::GOW17Analytic;
+    Ana::Settings a_off{1.0, 0.1, 1.6e-4, 3.2e-4, 1.7e-6, 1.0, inf, inf, 1.0, 1.0e9,
+                        3.0e20, true, false};
+    a_off.he_coll_ion = false;
+    Ana::Settings a_on = a_off;
+    a_on.hii_cooling = true;
+    double worst_t = 0.0, worst_a = 0.0;
+    for (const Real T : {8.0e3, 2.0e4, 1.0e5, 1.0e6}) {
+      const Real e = energy_at(c_off, T);
+      auto net_t = [&](const Net::Settings &s) {
+        const Net::Cell c = Net::MakeCell(1.0, GAMMA, s, uf, in);
+        return Net::HeatingCooling(y, e, c, Net::Prepare(y, e, c)).cooling;
+      };
+      auto net_a = [&](const Ana::Settings &s) {
+        const Ana::Cell c = Ana::MakeCell(1.0, GAMMA, s, uf, in);
+        return Ana::HeatingCooling(y, e, c, Ana::Prepare(y, e, c)).cooling;
+      };
+      const Net::Substep s = Net::Prepare(y, e, c_off);
+      const Real T_s = Net::RawTemperature(y, e, s.g.e, c_off);
+      const Real want = chemistry2::ionized::CoolingHII(
+          s.g.e, y[Net::IH_PLUS], n_h, T_s, chemistry2::ncr::AlphaBHII(T_s));
+      const Real got_t = net_t(h_on) - net_t(h_off);
+      const Real got_a = net_a(a_on) - net_a(a_off);
+      std::printf("  T %.3g K: H+ ff+rec cooling table %.6e, analytic %.6e, NCR %.6e\n",
+                  T_s, got_t, got_a, want);
+      worst_t = std::fmax(worst_t, std::fabs(got_t/want - 1.0));
+      worst_a = std::fmax(worst_a, std::fabs(got_a/want - 1.0));
+    }
+    report.ExpectNear(worst_t, 0.0, 0.0, 1e-3, "H+ ff+rec cooling, table = NCR");
+    report.ExpectNear(worst_a, 0.0, 0.0, 1e-10, "H+ ff+rec cooling, analytic = NCR");
   }
   return report.ExitCode();
 }

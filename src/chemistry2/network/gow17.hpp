@@ -30,6 +30,7 @@
 #include "chemistry2/network/network_config.hpp"
 #include "chemistry2/network/species_table.hpp"
 #include "chemistry2/thermo/dust.hpp"
+#include "chemistry2/thermo/ionized.hpp"
 #include "chemistry2/thermo/thermo.hpp"
 #include "chemistry2/unit_factors.hpp"
 #include "units/units.hpp"
@@ -92,11 +93,15 @@ struct GOW17Network {
     bool hot = false;
     Real temp_hot0 = 2.0e4, temp_hot1 = 3.5e4, zg = 1.0;
     hot::CIETable cie;         // analytic path only; the table path reads gow17::C_CIE
+    // free-free and case B recombination cooling of H+ (as NCR; not in GOW17); off for
+    // parity with src/chemistry
+    bool hii_cooling = false;
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
     Settings s = ReadValues(pin, b);
     s.he_coll_ion = pin->GetOrAddBoolean(b, "GOW17_he_coll_ion", true);
+    s.hii_cooling = pin->GetOrAddBoolean(b, "GOW17_hii_cooling", true);
     s.hot = pin->GetOrAddBoolean(b, "GOW17_hot_cooling", true);
     s.temp_hot0 = pin->GetOrAddReal(b, "GOW17_temp_hot0", 2.0e4);
     s.temp_hot1 = pin->GetOrAddReal(b, "GOW17_temp_hot1", 3.5e4);
@@ -341,6 +346,12 @@ struct GOW17Network {
       const Real c_hi = Thermo::CoolingHIion(g.h, g.e, r.k2[gow17::I2_H_E]);
       cooling += c_hi;
       cooling_h += c_hi;
+      if (c.s.hii_cooling) {  // r.k2 carries n_H: alpha_B = k2[HP_E]/n_H
+        const Real c_hii = ionized::CoolingHII(g.e, y[IH_PLUS], n_h, T,
+                                                 r.k2[gow17::I2_HP_E]*c.inv_n_h);
+        cooling += c_hii;
+        cooling_h += c_hii;
+      }
       if (c.s.he_coll_ion) {  // He I ionization energy per ionization
         cooling += c.s.chi_he_erg*r.k2[gow17::I2_HE_E]*g.e*g.he;
       }
@@ -497,6 +508,12 @@ struct GOW17Network {
       const S c_hi = Thermo::CoolingHIion(g.h, g.e, k_h_e);
       cooling += c_hi;
       cooling_h += c_hi;
+      if (c.s.hii_cooling) {
+        const S c_hii = (col(gow17::C_HII_FF) + col(gow17::C_HII_REC))*
+                        (n_h*g.e*y[IH_PLUS]);
+        cooling += c_hii;
+        cooling_h += c_hii;
+      }
       if (c.s.he_coll_ion) {  // He I ionization energy per ionization; value from Prepare
         S k_he_e = r.k2[gow17::I2_HE_E];
         if constexpr (DERIV) k_he_e.d = n_h*col(gow17::C_K2 + gow17::I2_HE_E).d;
