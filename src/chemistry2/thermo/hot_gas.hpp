@@ -37,7 +37,7 @@
 namespace chemistry2 {
 namespace hot {
 
-enum : int {LAMBDA_HE = 0, LAMBDA_METAL, XE_HE, XE_METAL, NCOL};
+enum : int {LAMBDA_H = 0, LAMBDA_HE, LAMBDA_METAL, XE_HE, XE_METAL, NCOL};  // file order
 
 //! w(T) on [t0, t1]; with S = dual::Dual the derivative part carries dw/dT
 template <class S>
@@ -86,10 +86,9 @@ inline CIESource ReadCIESource(const std::string &path) {
       }
     }
     lt.push_back(v[0]);
-    src.ln.push_back({std::log(std::fmax(v[2], 1.0e-300)),
-                      std::log(std::fmax(v[3], 1.0e-300)),
-                      std::log(std::fmax(v[4], 1.0e-300)),
-                      std::log(std::fmax(v[5], 1.0e-300))});
+    std::array<Real, NCOL> row;
+    for (int k = 0; k < NCOL; ++k) row[k] = std::log(std::fmax(v[k + 1], 1.0e-300));
+    src.ln.push_back(row);
   }
   if (lt.size() < 2) throw std::runtime_error("hot::ReadCIESource: no rows in " + path);
   src.lt0 = lt[0];
