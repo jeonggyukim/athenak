@@ -8,7 +8,9 @@
 //!        (data/tigris_ncr_states.txt, written by data/dump_tigris_ncr.cpp): C and D of
 //!        H2 and H+, x_e after the update and x_C+ to 1e-10 relative, x_CO to 1e-10 of
 //!        2 x_H2 x_C,tot; heating to 2e-4 and cooling to 2e-2, with the cooling also
-//!        reported by Tigris's groups (H I, H II, H2, other).
+//!        reported by Tigris's groups (H I, H II, H2, other). Hot gas (10^4.2 to 10^8 K,
+//!        data/tigris_ncr_hot_states.txt): heating to 2e-5 and cooling to 3e-3 outside
+//!        the window [temp_hot0, temp_hot1].
 
 #include <algorithm>
 #include <cmath>
@@ -134,5 +136,55 @@ int main(int argc, char *argv[]) {
   // in the C II/C I/O I/CO/grain group), 2026-11-20
   report.ExpectNear(hc_err[0][2], 0.0, 0.0, 2e-4, "heating vs Tigris NCR, worst state");
   report.ExpectNear(hc_err[1][2], 0.0, 0.0, 2e-2, "cooling vs Tigris NCR, worst state");
+
+  // hot gas: 500 states from 10^4.2 to 10^8 K (data/tigris_ncr_hot_states.txt, written by
+  // data/dump_tigris_ncr.cpp hot) with the CIE helium and metal terms. Inside the window
+  // [temp_hot0, temp_hot1] the blend weight and the helium weighting differ from Tigris
+  // (smoothstep and blended helium here, logistic and full-weight helium there), so the
+  // window is reported but not checked.
+  {
+    std::string dir(__FILE__);
+    dir = dir.substr(0, dir.find_last_of('/'));
+    Net::Settings sh = st;
+    sh.cie = chemistry2::hot::MakeCIETable(chemistry2::hot::ReadCIESource(
+        dir + "/../../../inputs/chemistry2/cie/tigress_coolftn_ncr.txt"));
+    std::ifstream hin(dir + "/data/tigris_ncr_hot_states.txt");
+    report.Expect(hin.good(), "read data/tigris_ncr_hot_states.txt");
+    double out_worst[2] = {}, in_worst[2] = {};
+    int n_out = 0, n_in = 0;
+    while (std::getline(hin, line)) {
+      if (line.empty() || line[0] == '#') continue;
+      std::istringstream ls(line);
+      double n_h, T, x_h2, x_hii, x_e, g, xi, skip, heat_ref, cool_ref;
+      ls >> n_h >> T >> x_h2 >> x_hii >> x_e >> g >> xi;
+      for (int k = 0; k < 7; ++k) ls >> skip;
+      ls >> heat_ref >> cool_ref;
+      const chemistry2::UnitFactors u = chemistry2::MakeUnitFactors(
+          n_h*MU_H*units::Units::hydrogen_mass_cgs, U_TIME, U_ENERGY, MU_H);
+      const Net::Cell c = Net::MakeCell(1.0, GAMMA, sh, u,
+                                        chemistry2::CellInputs{g, xi, 0.0});
+      Real y[Net::NSPEC];
+      y[Net::IH2] = x_h2;
+      y[Net::IH_PLUS] = x_hii;
+      y[Net::IE] = x_e;
+      const Real e = n_h*chemistry2::Thermo::CvCold(x_h2, 0.1, x_e, GAMMA)*T/U_ENERGY;
+      const Net::HeatCool hc = Net::HeatingCooling(y, e, c, Net::Prepare(y, e, c));
+      // above temp_hot1 Tigris heats by its floor heat_min = 1e-35 erg s^-1 per H only
+      const double err[2] = {heat_ref > 1e-34 ? Rel(hc.heating, heat_ref) : 0.0,
+                             Rel(hc.cooling, cool_ref)};
+      const bool window = (T > sh.temp_hot0) && (T < sh.temp_hot1);
+      double *w = window ? in_worst : out_worst;
+      for (int q = 0; q < 2; ++q) w[q] = std::fmax(w[q], err[q]);
+      ++(window ? n_in : n_out);
+    }
+    std::printf("  hot gas outside [temp_hot0, temp_hot1], %d states: heating max %.2e, "
+                "cooling max %.2e\n", n_out, out_worst[0], out_worst[1]);
+    std::printf("  hot gas inside the window (not checked), %d states: heating max %.2e, "
+                "cooling max %.2e\n", n_in, in_worst[0], in_worst[1]);
+    report.Expect(n_out + n_in == 500, "500 hot states read");
+    // measured 1.0e-5 (heating) and 1.55e-3 (cooling), 2026-11-20
+    report.ExpectNear(out_worst[0], 0.0, 0.0, 2e-5, "hot heating vs Tigris NCR");
+    report.ExpectNear(out_worst[1], 0.0, 0.0, 3e-3, "hot cooling vs Tigris NCR");
+  }
   return report.ExitCode();
 }

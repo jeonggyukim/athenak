@@ -35,7 +35,7 @@ std::vector<std::vector<double>> SourceRows(const std::string &path) {
     std::istringstream is(line);
     std::vector<double> v(10);
     for (double &x : v) is >> x;
-    rows.push_back({v[0], v[2], v[3], v[4], v[5]});
+    rows.push_back({v[0], v[1], v[2], v[3], v[4], v[5]});
   }
   return rows;
 }
@@ -124,7 +124,8 @@ int main(int argc, char *argv[]) {
                        Net::MakeCell(1.0, GAMMA, base, uf, in)), t0, t1);
     const auto a = eval(cold), b = eval(no_cie), c = eval(with_cie);
     // other = a - (hydrogen part); hydrogen part = b at w = 1, so use b = H + (1-w) O
-    const Real cie_direct = n_h*(rows[row][1] + rows[row][2]);
+    const Real cie_direct = n_h*(rows[row][1 + hot::LAMBDA_HE] +
+                                 rows[row][1 + hot::LAMBDA_METAL]);
     std::printf("  log T %.2f: w %.4f; cooling cold %.4e, blend %.4e, with CIE %.4e "
                 "(CIE term %.4e); heating cold %.4e, blend %.4e\n", rows[row][0], w,
                 a.cooling, b.cooling, c.cooling, cie_direct, a.heating, b.heating);
@@ -146,7 +147,8 @@ int main(int argc, char *argv[]) {
     chemistry2::Slot slot;
     const Net::TCoef tc = Net::Coefficients(T, c, &slot);
     const Real x_e = Net::FreeElectrons(1.1, 1e-8, 0.999, T, c, tc);
-    report.ExpectNear(x_e, 0.999 + rows[60][3] + rows[60][4], 1e-5, 0.0,  // 7.4e-6
+    const Real x_e_ref = 0.999 + rows[60][1 + hot::XE_HE] + rows[60][1 + hot::XE_METAL];
+    report.ExpectNear(x_e, x_e_ref, 1e-5, 0.0,  // 7.4e-6
                       "x_e above T1 = x_H+ + xe_He + xe_metal");
   }
 

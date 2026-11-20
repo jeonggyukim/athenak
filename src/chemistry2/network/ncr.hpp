@@ -78,11 +78,15 @@ struct NCRNetwork {
     // Tigris NCR (default), or Voronov (1997) from inputs/chemistry2/ions
     bool coll_ion_hi_voronov = false;
     Rates::CollIonFit ci_h;
+    // above temp_hot0 the hydrogen cooling hands over to the CIE n_H Lambda_H(T) with the
+    // hot-gas weight (Tigris cool_hyd_cie_flag)
+    bool cool_hyd_cie = false;
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
     Settings s = ReadValues(pin, b);
     s.temp_hot0 = pin->GetOrAddReal(b, "NCR_temp_hot0", ncr::TEMP_HOT0);
+    s.cool_hyd_cie = pin->GetOrAddBoolean(b, "NCR_cool_hyd_cie", false);
     const std::string ci = pin->GetOrAddString(b, "NCR_coll_ion_HI", "janev");
     if (ci != "janev" && ci != "voronov") {
       throw std::runtime_error("NCR_coll_ion_HI must be janev or voronov, not " + ci);
@@ -464,6 +468,7 @@ struct NCRNetwork {
         Real v[hot::NCOL];
         c.s.cie.Eval(T, v);
         lam = v[hot::LAMBDA_HE] + c.s.zg*v[hot::LAMBDA_METAL];
+        if (c.s.cool_hyd_cie) HotHydrogen<Real>(T, n_h*v[hot::LAMBDA_H], c, &cooling);
       }
       HotBlend<Real>(T, n_h*lam, c, &heating, &other);
     }
@@ -479,6 +484,15 @@ struct NCRNetwork {
     const S w = hot::Weight<S>(T, c.s.temp_hot0, c.s.temp_hot1);
     *heating *= 1.0 - w;
     *other = (1.0 - w)*(*other) + w*cie;
+  }
+
+  //! Above temp_hot0: the hydrogen cooling times 1 - w plus w times the CIE hydrogen
+  //! cooling cie [erg s^-1 per H]
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static void HotHydrogen(const S &T, const S &cie, const Cell &c,
+                                                 S *cooling) {
+    const S w = hot::Weight<S>(T, c.s.temp_hot0, c.s.temp_hot1);
+    *cooling = (1.0 - w)*(*cooling) + w*cie;
   }
 
   static constexpr bool EDOT_DERIVATIVE = TABLE;  // EdotWithDerivative, dual numbers
@@ -604,6 +618,9 @@ struct NCRNetwork {
     if (T > c.s.temp_hot0) {
       const S cie = n_h*(col(gow17::C_CIE + hot::LAMBDA_HE) +
                          c.s.zg*col(gow17::C_CIE + hot::LAMBDA_METAL));
+      if (c.s.cool_hyd_cie) {
+        HotHydrogen<S>(Ts, n_h*col(gow17::C_CIE + hot::LAMBDA_H), c, &cooling);
+      }
       HotBlend<S>(Ts, cie, c, &heating, &other);
     }
     return HeatCoolT<S>{heating, cooling + other};

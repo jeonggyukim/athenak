@@ -32,7 +32,9 @@
 #include "parameter_input.hpp"
 #include "photchem/ncr_rates.hpp"
 
-int main() {
+int main(int argc, char *argv[]) {
+  // with the argument "hot": ionized states at 1.6e4 to 1e8 K (tigris_ncr_hot_states.txt)
+  const bool hot = (argc > 1 && std::string(argv[1]) == "hot");
   ParameterInput *pin = new ParameterInput;
   std::istringstream is(std::string("<hydro>\ngamma = 1.6666666666666667\n"
       "<photchem_ncr>\ninterp_mode = 0\ncool_dust_flag = false\n"
@@ -50,9 +52,15 @@ int main() {
   for (int n = 0; n < 500; ++n) {
     NCRVar v{};
     v.nH = std::pow(10.0, -2.0 + 6.0*u(rng));
-    v.temp = std::pow(10.0, 1.0 + 3.2*u(rng));  // 10 K to 1.6e4 K
-    v.x_h2 = 0.49*u(rng);
-    v.x_hii = (1.0 - 2.0*v.x_h2)*std::pow(10.0, -6.0*u(rng));
+    if (hot) {
+      v.temp = std::pow(10.0, 4.2 + 3.8*u(rng));  // 1.6e4 K to 1e8 K
+      v.x_h2 = 1e-6*u(rng);
+      v.x_hii = (1.0 - 2.0*v.x_h2)*(1.0 - std::pow(10.0, -4.0*u(rng)));
+    } else {
+      v.temp = std::pow(10.0, 1.0 + 3.2*u(rng));  // 10 K to 1.6e4 K
+      v.x_h2 = 0.49*u(rng);
+      v.x_hii = (1.0 - 2.0*v.x_h2)*std::pow(10.0, -6.0*u(rng));
+    }
     v.x_hi = std::fmax(1.0 - 2.0*v.x_h2 - v.x_hii, 1e-20);
     v.x_e = v.x_hii + 1.6e-4*u(rng);
     const Real G = std::pow(10.0, -3.0 + 5.0*u(rng));

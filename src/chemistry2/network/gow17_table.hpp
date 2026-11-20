@@ -36,9 +36,9 @@ enum : int {
   C_H2GEFF = C_OI_BOLTZ + 3,             // geff_H, geff_H2
   C_H2COOL = C_H2GEFF + 2,               // LHI, LH2, LHe, LHplus, Le, LTE
   C_LYA = C_H2COOL + 6,                  // fac, k01
-  C_CIE = C_LYA + 2,                     // hot::NCOL CIE columns (Lambda_He,
-                                         // Lambda_metal, xe_He, xe_metal); zero
-                                         // without a CIE table
+  C_CIE = C_LYA + 2,                     // hot::NCOL CIE columns (Lambda_H,
+                                         // Lambda_He, Lambda_metal, xe_He, xe_metal);
+                                         // zero without a CIE table
   C_HII_FF = C_CIE + hot::NCOL,          // free-free factor g_ff sqrt(T4) 1.422e-25
   C_HII_REC,                             // recombination energy times alpha_B
                                          // [erg cm^3 s^-1]
