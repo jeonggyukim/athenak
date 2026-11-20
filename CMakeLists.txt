@@ -147,8 +147,9 @@ set(Kokkos_ROOT ${CMAKE_CURRENT_BINARY_DIR}/kokkos CACHE PATH "" FORCE)
 #
 #   -D KokkosKernels_PATH=/path/to/your/kokkos-kernels
 #
-# When set, that directory is used and edits are picked up on the next build.
-set(KokkosKernels_PATH "" CACHE PATH
+# When set, that directory is used and edits are picked up on the next build. Without the
+# -D option, the environment variable KokkosKernels_PATH is used if set.
+set(KokkosKernels_PATH "$ENV{KokkosKernels_PATH}" CACHE PATH
   "Path to a local Kokkos Kernels checkout to build against instead of fetching it")
 
 if(KokkosKernels_PATH)
