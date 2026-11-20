@@ -20,12 +20,14 @@
 
 namespace chemistry2 {
 
+//! The radiation and CR inputs one cell's chemistry sees
 struct CellInputs {
   Real g0;      // FUV field [Draine 1978 units]
   Real xi_cr;   // cosmic-ray ionization rate per H [s^-1]
   Real grad_v;  // |grad v| for the LVG escape of CO lines [s^-1]
 };
 
+//! Where the inputs come from: uniform values from <chemistry2> for now
 struct InputSource {
   Real g0;
   Real xi_cr;

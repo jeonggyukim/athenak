@@ -78,6 +78,7 @@ struct GOW17TemperatureRates {
                                                const bool kgr_h2_const);
 };
 
+// C+ radiative plus dielectronic recombination rate coefficient [cm^3 s^-1]
 KOKKOS_INLINE_FUNCTION Real CIIRecombination(const Real T) {
   constexpr Real A = 2.995e-9;
   constexpr Real B = 0.7849;
@@ -108,6 +109,7 @@ KOKKOS_INLINE_FUNCTION Real H2FormationOnGrains(const Real T, const bool constan
   return kgr0*Kokkos::sqrt(T2)*2.0/(1 + 0.4*Kokkos::sqrt(T2) + 0.2*T2 + 0.08*T2*T2);
 }
 
+// evaluate every T-only rate coefficient from its fit (the analytic path)
 KOKKOS_INLINE_FUNCTION GOW17TemperatureRates::GOW17TemperatureRates(
     const Real T_rates, const Real T_coll_in, const bool kgr_h2_const)
     : T(T_rates), T_coll(T_coll_in) {

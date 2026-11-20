@@ -188,6 +188,8 @@ struct GOW17ThermoCoefficients {
   Thermo::H2CoolingCoefficientsT<S> h2cool;
 };
 
+// the fine-structure and H2 cooling coefficients at T from the table rows s (with
+// d/dT when S is dual)
 template <class S>
 KOKKOS_INLINE_FUNCTION GOW17ThermoCoefficients<S> LookupThermo(const RowTable &t,
                                                                const Slot &s,

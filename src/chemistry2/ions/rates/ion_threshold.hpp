@@ -25,6 +25,7 @@
 namespace chemistry2 {
 namespace ions {
 
+//! Ionization thresholds (energies) per ion, read from the ion data directory
 class IonThreshold {
  public:
   void Load(const std::string &path) {

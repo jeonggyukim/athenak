@@ -26,6 +26,7 @@
 
 namespace chemistry2 {
 
+// number of stored species of a network (rows of its species table)
 template <class Network>
 constexpr int NumSpecies() { return static_cast<int>(Network::rows.size()); }
 
@@ -46,6 +47,7 @@ KOKKOS_INLINE_FUNCTION void SubtractAtoms(const Real *y, Real &x) {
   }
 }
 
+// x_elem minus the atoms of E in each of the species I...
 template <class Network, int E, std::size_t... I>
 KOKKOS_INLINE_FUNCTION Real ElementRemainder(const Real *y, const Real x_elem,
                                              std::index_sequence<I...>) {
@@ -69,6 +71,7 @@ KOKKOS_INLINE_FUNCTION Real ElementBudget(const Real *y, const Real x_elem) {
   return Kokkos::fmax(ElementRemainder<Network, E>(y, x_elem), 0.0);
 }
 
+// add the charge of stored species I to x_e
 template <class Network, std::size_t I>
 KOKKOS_INLINE_FUNCTION void AddCharge(const Real *y, Real &x_e) {
   constexpr int q = Network::rows[I].charge;
@@ -79,6 +82,7 @@ KOKKOS_INLINE_FUNCTION void AddCharge(const Real *y, Real &x_e) {
   }
 }
 
+// electrons from charge conservation: the summed charge of the stored ions
 template <class Network, std::size_t... I>
 KOKKOS_INLINE_FUNCTION Real ChargeSum(const Real *y, std::index_sequence<I...>) {
   Real x_e = 0.0;

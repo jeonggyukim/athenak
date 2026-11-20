@@ -1139,6 +1139,7 @@ class Thermo {
                                                   0.05089};
 };
 
+// constructors of the coefficient sets from T: evaluate the fits once
 template <class S>
 KOKKOS_INLINE_FUNCTION Thermo::CIIRateCoefficientsT<S>::CIIRateCoefficientsT(const Real T)
     : CIIRateCoefficientsT(Thermo::ComputeCII(T)) {}

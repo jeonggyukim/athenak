@@ -25,6 +25,7 @@
 namespace chemistry2 {
 namespace ions {
 
+//! Cooling per ion on a (log T, log n_e) grid, on the device
 struct IonCoolingTable {
   static constexpr int N_NE = 17;
   static constexpr Real LOGNE_MIN = -2.0;
@@ -50,11 +51,13 @@ struct IonCoolingTable {
 };
 
 namespace ion_cooling_detail {
+// one ion's cooling file as read on the host
 struct SourceTable {
   std::vector<Real> log_t;
   std::vector<std::vector<Real>> log_l;  // [row][n_e column]
 };
 
+// read log T and log Lambda at each n_e column from one file
 inline SourceTable Read(const std::string &path) {
   std::ifstream f(path);
   if (!f) throw std::runtime_error("IonCoolingTable: cannot open " + path);

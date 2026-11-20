@@ -65,6 +65,8 @@ struct CIESource {
   }
 };
 
+//! Read the TIGRESS CIE cooling table (log T, Lambda_H, Lambda_He, Lambda_metal,
+//! xe_He, xe_metal, ...) and keep the logarithms of the NCOL columns
 inline CIESource ReadCIESource(const std::string &path) {
   std::ifstream f(path);
   if (!f) throw std::runtime_error("hot::ReadCIESource: cannot open " + path);
@@ -126,6 +128,7 @@ struct CIETable {
   }
 };
 
+//! Copy a CIESource to the device
 inline CIETable MakeCIETable(const CIESource &src) {
   CIETable t;
   t.n = static_cast<int>(src.ln.size());

@@ -21,6 +21,7 @@
 
 namespace chemistry2 {
 
+//! <chemistry2> kokkos_BDF_* keys
 struct KokkosBDFSettings {
   Real first_step_frac;  // first internal step / dt; 0 lets the solver choose
   Real rtol, atol;
@@ -32,6 +33,7 @@ struct KokkosBDFSettings {
   }
 };
 
+//! Adaptive BDF from Kokkos Kernels on the species and energy of one cell
 template <class Network>
 class KokkosBDF {
  public:
