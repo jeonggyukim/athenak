@@ -68,6 +68,7 @@ struct NCROxygen {
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
     Settings s{Base::ReadSettings(pin, b), RowTable(), ions::IonCoolingTable()};
+    s.base.nebular = false;  // the ladder ions cool by their own lines (as Tigris)
     // the ion data are read only when this chemical network is the one selected
     if (pin->GetOrAddString(b, "network", "") != std::string(NAME)) return s;
     const std::string dir = pin->GetOrAddString(b, "ion_data_dir",

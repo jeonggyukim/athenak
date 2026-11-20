@@ -37,6 +37,7 @@ int main(int argc, char *argv[]) {
                     true, false, 10.0, 0.0}, chemistry2::RowTable(),
                    chemistry2::ions::IonCoolingTable()};
   st.base.table = chemistry2::ncr::BuildNCRTable();
+  st.base.nebular = false;  // as NCROxygen::ReadSettings
   st.base.case_a = (argc > 1 && std::string(argv[1]) == "case_a");  // as Cloudy CIE
   const chemistry2::ions::IonRateData data(dir);
   st.ions = chemistry2::ions::BuildIonTable(data, st.base.table.grid, 8, 2);

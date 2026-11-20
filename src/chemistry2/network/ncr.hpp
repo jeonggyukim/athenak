@@ -66,6 +66,7 @@ struct NCRNetwork {
     Real temp_dust, alpha_gd;
     RowTable table;              // NCR rate table (TABLE only)
     bool case_a = false;         // H+ recombination: case A instead of B (as Cloudy CIE)
+    bool nebular = true;         // nebular line fit; off when ion ladders cool by line
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
@@ -397,7 +398,7 @@ struct NCRNetwork {
       cooling += ncr_terms::CoolingH2Moseley(x_h2, x_hi, n_h, T);
     }
     cooling += ncr_terms::CoolingHII(x_e, y[IH_PLUS], n_h, T, ncr::AlphaBHII(T));
-    if (T < c.s.temp_hot1) {
+    if (c.s.nebular && T < c.s.temp_hot1) {
       cooling += ncr_terms::CoolingNebular(x_e, y[IH_PLUS], n_h, T, c.s.zg);
     }
     cooling += Thermo::CoolingRec(c.s.zd, T, n_e, c.chi);
@@ -505,7 +506,7 @@ struct NCRNetwork {
                   col(ncr::C_MOS + 3)*d4)*x_h2;
     }
     cooling += (col(ncr::C_HII_FF) + col(ncr::C_HII_REC))*(n_h*x_e*x_hii);
-    if (T < c.s.temp_hot1) {  // nebular lines
+    if (c.s.nebular && T < c.s.temp_hot1) {  // nebular lines
       const S l = dual::log(Ts*1e-4);
       const S f_red = 1.0/(1.0 + 0.12*dual::pow(x_e*n_h*1e-2, 0.38 - 0.12*l));
       cooling += col(ncr::C_NEB)*f_red*(3.677602203699553e-21*c.s.zg*x_hii*x_e*n_h);

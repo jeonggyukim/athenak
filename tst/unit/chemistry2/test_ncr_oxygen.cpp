@@ -35,6 +35,7 @@ int main(int argc, char *argv[]) {
                     false, 10.0, 0.0}, chemistry2::RowTable(),
                    chemistry2::ions::IonCoolingTable()};
   st.base.table = chemistry2::ncr::BuildNCRTable();
+  st.base.nebular = false;  // as NCROxygen::ReadSettings
   st.ions = chemistry2::ions::BuildIonTable(chemistry2::ions::IonRateData(dir),
                                             st.base.table.grid, 8, 2);
   st.cool = chemistry2::ions::BuildIonCoolingTable(st.base.table.grid,
