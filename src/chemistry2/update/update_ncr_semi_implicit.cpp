@@ -12,4 +12,6 @@
 
 namespace chemistry2 {
 template void Chemistry2::Update<Pair<NCR, SemiImplicit>>(Real t, Real dt);
+template EquilibriumStats Chemistry2::EquilibrateCells<Pair<NCR, SemiImplicit>>(
+    const EquilibriumSettings &q);
 }  // namespace chemistry2

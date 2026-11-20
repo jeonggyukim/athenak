@@ -36,6 +36,12 @@ struct Chemistry2TaskIDs {
       cons_to_prim, csend, crecv;
 };
 
+//! Result of Equilibrate over all ranks
+struct EquilibriumStats {
+  int not_converged;  // cells that reached nsub_max or t_max first
+  int max_substeps;   // largest substep count of a converged cell
+};
+
 //! Settings of every registered network, read once; only the active one is used
 struct NetworkSettings {
   H2::Settings h2;
@@ -67,6 +73,12 @@ class Chemistry2 {
   //! Advance the chemistry of every cell over dt with the active pair (outside the task
   //! list, e.g. to equilibrate an initial state)
   void Advance(Real dt);
+  //! Solve every cell of the pack to equilibrium with one registered semi-implicit pair
+  template <class Pair>
+  EquilibriumStats EquilibrateCells(const EquilibriumSettings &q);
+  //! Solve every cell to equilibrium with the active pair (semi-implicit only), e.g. to
+  //! set an initial state; the counts are summed (maxed) over ranks
+  EquilibriumStats Equilibrate(const EquilibriumSettings &q);
 
   // the tasks (chemistry2_tasks.cpp): the update over the hydro dt, then the
   // conserved variables and the ghost-cell exchange

@@ -121,6 +121,10 @@ struct NCROxygen {
     return Base::Temperature(y, e, c.base);
   }
 
+  KOKKOS_INLINE_FUNCTION static Real Energy(const Real *y, const Real T, const Cell &c) {
+    return Base::Energy(y, T, c.base);
+  }
+
   //! NCR's substep, with O I (for its cooling) from the stored oxygen ions
   KOKKOS_INLINE_FUNCTION static Substep Prepare(const Real *y, const Real e,
                                                 const Cell &c) {
