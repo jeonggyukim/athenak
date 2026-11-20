@@ -167,6 +167,7 @@ class RateGrid {
 template <InterpMode Mode> inline Real TabEncode(Real x);
 template <InterpMode Mode> inline Real TabDecode(Real y);
 
+//! kLogLog: log10 on both axes; kNqt1: the fast nqt1 log approximation on both
 template <> inline Real TabEncode<InterpMode::kLogLog>(Real x) {
   return std::log10(x);
 }

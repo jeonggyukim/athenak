@@ -8,7 +8,7 @@
 //!        One file per registered pair, so the pairs compile in parallel.
 
 #include "chemistry2/registry.hpp"
-#include "chemistry2/update.hpp"
+#include "chemistry2/update/update.hpp"
 
 namespace chemistry2 {
 template void Chemistry2::Update<Pair<H2, SemiImplicit>>(Real t, Real dt);

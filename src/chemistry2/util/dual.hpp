@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_RATES_DUAL_HPP_
-#define CHEMISTRY2_RATES_DUAL_HPP_
+#ifndef CHEMISTRY2_UTIL_DUAL_HPP_
+#define CHEMISTRY2_UTIL_DUAL_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -39,6 +39,7 @@ struct Dual {
   }
 };
 
+// arithmetic between dual numbers: the sum, product and quotient rules
 KOKKOS_INLINE_FUNCTION Dual operator-(const Dual a) { return Dual(-a.v, -a.d); }
 KOKKOS_INLINE_FUNCTION Dual operator+(const Dual a, const Dual b) {
   return Dual(a.v + b.v, a.d + b.d);
@@ -82,6 +83,7 @@ KOKKOS_INLINE_FUNCTION Dual operator/(const Real a, const Dual b) {
   const Real q = a*r;
   return Dual(q, -q*b.d*r);
 }
+// elementary functions: f(v) and f'(v) d (chain rule)
 KOKKOS_INLINE_FUNCTION Dual exp(const Dual a) {
   const Real e = Kokkos::exp(a.v);
   return Dual(e, e*a.d);
@@ -107,6 +109,7 @@ KOKKOS_INLINE_FUNCTION Dual pow(const Dual a, const Dual p) {
 KOKKOS_INLINE_FUNCTION Dual log10(const Dual a) {
   return Dual(Kokkos::log10(a.v), a.d/(a.v*2.302585092994046));
 }
+// fmin/fmax pick a whole dual number by comparing the values
 KOKKOS_INLINE_FUNCTION Dual fmax(const Dual a, const Dual b) {
   return (a.v >= b.v) ? a : b;
 }
@@ -119,6 +122,7 @@ KOKKOS_INLINE_FUNCTION Dual fmax(const Dual a, const Real b) {
 KOKKOS_INLINE_FUNCTION Dual fmin(const Dual a, const Real b) {
   return (a.v <= b) ? a : Dual(b);
 }
+// comparisons act on the values
 KOKKOS_INLINE_FUNCTION bool operator<(const Dual a, const Dual b) { return a.v < b.v; }
 KOKKOS_INLINE_FUNCTION bool operator>(const Dual a, const Dual b) { return a.v > b.v; }
 KOKKOS_INLINE_FUNCTION bool operator<=(const Dual a, const Dual b) { return a.v <= b.v; }
@@ -144,4 +148,4 @@ KOKKOS_INLINE_FUNCTION Real Value(const Dual a) { return a.v; }
 }  // namespace dual
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_RATES_DUAL_HPP_
+#endif  // CHEMISTRY2_UTIL_DUAL_HPP_

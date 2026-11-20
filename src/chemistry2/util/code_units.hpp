@@ -1,11 +1,11 @@
-#ifndef CHEMISTRY2_UNIT_FACTORS_HPP_
-#define CHEMISTRY2_UNIT_FACTORS_HPP_
+#ifndef CHEMISTRY2_UTIL_CODE_UNITS_HPP_
+#define CHEMISTRY2_UTIL_CODE_UNITS_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
 // Licensed under the 3-clause BSD License (the "LICENSE")
 //========================================================================================
-//! \file unit_factors.hpp
+//! \file code_units.hpp
 //! \brief Code-unit factors the chemistry kernel needs, computed once on the host.
 //!
 //!   Every conversion in the kernel is one multiplication by a factor or by its inverse;
@@ -36,4 +36,4 @@ KOKKOS_INLINE_FUNCTION UnitFactors MakeUnitFactors(const Real density_cgs,
 
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_UNIT_FACTORS_HPP_
+#endif  // CHEMISTRY2_UTIL_CODE_UNITS_HPP_

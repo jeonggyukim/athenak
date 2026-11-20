@@ -18,7 +18,7 @@
 
 #include "athena.hpp"
 #include "check.hpp"
-#include "chemistry2/network/gow17.hpp"
+#include "chemistry2/network/gow17/gow17.hpp"
 
 namespace {
 using Tab = chemistry2::GOW17;

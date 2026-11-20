@@ -22,7 +22,7 @@
 #include "chemistry2/inputs/cell_inputs.hpp"
 #include "chemistry2/network/network_config.hpp"
 #include "chemistry2/network/species_table.hpp"
-#include "chemistry2/unit_factors.hpp"
+#include "chemistry2/util/code_units.hpp"
 #include "units/units.hpp"
 
 namespace chemistry2 {

@@ -18,8 +18,8 @@
 
 #include "athena.hpp"
 #include "units/units.hpp"
-#include "chemistry2/network/gow17.hpp"
-#include "chemistry2/network/ncr.hpp"
+#include "chemistry2/network/gow17/gow17.hpp"
+#include "chemistry2/network/ncr/ncr.hpp"
 #include "chemistry2/solvers/semi_implicit.hpp"
 
 namespace {

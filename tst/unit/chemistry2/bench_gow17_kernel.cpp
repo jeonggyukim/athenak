@@ -24,7 +24,7 @@
 #include "chemistry/chemistry_utils.hpp"
 #include "chemistry/network/gow17.hpp"
 #include "ode_solvers/semi_implicit.hpp"
-#include "chemistry2/network/gow17.hpp"
+#include "chemistry2/network/gow17/gow17.hpp"
 #include "chemistry2/solvers/semi_implicit.hpp"
 
 namespace {

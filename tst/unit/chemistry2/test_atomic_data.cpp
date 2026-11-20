@@ -16,7 +16,7 @@
 #include "check.hpp"
 #include "chemistry2/ions/rates/coll_ion_rate.hpp"
 #include "chemistry2/ions/rates/ion_threshold.hpp"
-#include "chemistry2/network/gow17_table.hpp"
+#include "chemistry2/network/gow17/gow17_table.hpp"
 
 int main(int argc, char *argv[]) {
   Kokkos::ScopeGuard guard(argc, argv);

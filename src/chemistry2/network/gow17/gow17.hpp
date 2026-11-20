@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_NETWORK_GOW17_HPP_
-#define CHEMISTRY2_NETWORK_GOW17_HPP_
+#ifndef CHEMISTRY2_NETWORK_GOW17_GOW17_HPP_
+#define CHEMISTRY2_NETWORK_GOW17_GOW17_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -21,18 +21,18 @@
 
 #include "athena.hpp"
 #include "parameter_input.hpp"
-#include "chemistry2/data_path.hpp"
 #include "chemistry2/inputs/cell_inputs.hpp"
 #include "chemistry2/ions/rates/coll_ion_rate.hpp"
 #include "chemistry2/ions/rates/ion_threshold.hpp"
-#include "chemistry2/network/gow17_rates.hpp"
-#include "chemistry2/network/gow17_table.hpp"
+#include "chemistry2/network/gow17/gow17_rates.hpp"
+#include "chemistry2/network/gow17/gow17_table.hpp"
 #include "chemistry2/network/network_config.hpp"
 #include "chemistry2/network/species_table.hpp"
 #include "chemistry2/thermo/dust.hpp"
 #include "chemistry2/thermo/ionized.hpp"
 #include "chemistry2/thermo/thermo.hpp"
-#include "chemistry2/unit_factors.hpp"
+#include "chemistry2/util/code_units.hpp"
+#include "chemistry2/util/data_path.hpp"
 #include "units/units.hpp"
 
 namespace chemistry2 {
@@ -98,6 +98,8 @@ struct GOW17Network {
     bool hii_cooling = false;
   };
 
+  //! Read <chemistry2> GOW17_* keys; load the data files and build the rate table only
+  //! when a GOW17 network is selected
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
     Settings s = ReadValues(pin, b);
     s.he_coll_ion = pin->GetOrAddBoolean(b, "GOW17_he_coll_ion", true);
@@ -165,6 +167,8 @@ struct GOW17Network {
     Real cr_heat_h2;         // heat per cosmic-ray ionization in molecular gas [erg]
   };
 
+  //! The Cell from the density and the radiation and CR inputs; the photo rates are
+  //! computed here once per hydro step
   KOKKOS_INLINE_FUNCTION static Cell MakeCell(const Real rho, const Real gamma,
                                               const Settings &s, const UnitFactors &u,
                                               const CellInputs &in) {
@@ -186,6 +190,7 @@ struct GOW17Network {
     return c;
   }
 
+  //! The unstored ("ghost") species: neutral Si, C, O, He, H, and the electrons
   struct Ghosts {
     Real si, c, o, he, e, h;
   };
@@ -198,6 +203,8 @@ struct GOW17Network {
     gow17::GOW17Rates r;
   };
 
+  //! Ghosts from element conservation (total minus stored species) and charge
+  //! conservation (electrons)
   KOKKOS_INLINE_FUNCTION static Ghosts MakeGhosts(const Real *y, const Settings &s) {
     Ghosts g;
     g.si = ElementBudget<GOW17Network, ELEM_SI>(y, s.x_si);
@@ -249,6 +256,8 @@ struct GOW17Network {
     }
   }
 
+  //! Everything a substep needs at the current state: ghosts (and hot-gas electrons),
+  //! T clamped to the range of the rate fits, and the rate coefficients
   KOKKOS_INLINE_FUNCTION static Substep Prepare(const Real *y, const Real e,
                                                 const Cell &c) {
     Substep sub;
@@ -295,6 +304,8 @@ struct GOW17Network {
     return c.u_time*((hc.heating - hc.cooling)*c.n_h*c.inv_u_energy);
   }
 
+  //! Heating and cooling [erg s^-1 per H] at the current state (analytic path; the
+  //! table path is HeatCoolTable)
   KOKKOS_INLINE_FUNCTION static HeatCool HeatingCooling(const Real *y, const Real e,
                                                         const Cell &c,
                                                         const Substep &sub) {
@@ -609,6 +620,8 @@ struct GOW17Network {
   template <int K>
   static constexpr bool CUSTOM_UPDATE = (K == ICO);
 
+  //! The CO/HCO+ block: CO forms from CHx + O and OHx + C, and also from HCO+ + e;
+  //! HCO+ forms from C+ + OHx and from CO + H3+ and CRs; solved together
   template <int K>
   KOKKOS_INLINE_FUNCTION static void Update(Real *y, const Real *y_n, const Real,
                                             const Cell &cl, const Substep &sub,
@@ -638,6 +651,7 @@ struct GOW17Network {
     }
   }
 
+  // no closures: the ghosts are recomputed from y at the next substep
   KOKKOS_INLINE_FUNCTION static void Closures(Real *, const Real *, const Cell &) {}
 };
 
@@ -646,4 +660,4 @@ using GOW17Analytic = GOW17Network<false>;
 
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_NETWORK_GOW17_HPP_
+#endif  // CHEMISTRY2_NETWORK_GOW17_GOW17_HPP_

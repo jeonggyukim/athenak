@@ -13,7 +13,7 @@
 #include "check.hpp"
 #include "chemistry2/inputs/cell_inputs.hpp"
 #include "chemistry2/registry.hpp"
-#include "chemistry2/unit_factors.hpp"
+#include "chemistry2/util/code_units.hpp"
 
 int main(int argc, char *argv[]) {
   Kokkos::ScopeGuard guard(argc, argv);

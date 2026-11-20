@@ -14,7 +14,7 @@
 #include <random>
 
 #include "athena.hpp"
-#include "chemistry2/network/gow17_table.hpp"
+#include "chemistry2/network/gow17/gow17_table.hpp"
 
 using chemistry2::NqtExp;
 using chemistry2::NqtLog;

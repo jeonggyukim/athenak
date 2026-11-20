@@ -17,7 +17,7 @@
 
 #include "athena.hpp"
 #include "check.hpp"
-#include "chemistry2/network/ncr.hpp"
+#include "chemistry2/network/ncr/ncr.hpp"
 
 namespace {
 using Net = chemistry2::NCR;

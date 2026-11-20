@@ -10,7 +10,7 @@
 
 #include "athena.hpp"
 #include "check.hpp"
-#include "chemistry2/rates/dual.hpp"
+#include "chemistry2/util/dual.hpp"
 
 namespace {
 using chemistry2::dual::Dual;

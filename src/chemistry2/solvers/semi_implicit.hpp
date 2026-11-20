@@ -37,10 +37,10 @@
 namespace chemistry2 {
 
 struct SemiImplicitSettings {
-  Real dt_sub_frac;
-  Real yfloor;
-  int nsub_max;
-  bool refresh_rates;
+  Real dt_sub_frac;    // substep as a fraction of the shortest limiting timescale
+  Real yfloor;         // abundance floor in the species timescale y/|f|
+  int nsub_max;        // the last allowed substep takes the time left
+  bool refresh_rates;  // recompute rates at the new temperature before the species
 
   static SemiImplicitSettings Read(ParameterInput *pin, const std::string &block) {
     return SemiImplicitSettings{
@@ -68,6 +68,7 @@ class SemiImplicit {
     Real t_now = t_start;
     int n = 0;
     for (; t_now < t_end; n++) {
+      // start of substep: clip negative abundances and energy, keep y^n
       Real y_n[NSPEC];  // NOLINT(runtime/arrays)
       for (int k = 0; k < NSPEC; k++) {
         y_n[k] = Kokkos::fmax(y[k], 0.0);
@@ -75,6 +76,7 @@ class SemiImplicit {
       }
       e = Kokkos::fmax(e, 0.0);
 
+      // rates at the current state, then edot and its (non-positive) slope d(edot)/de
       Substep sub = Network::Prepare(y, e, cell);
       Real edot, dedot_de;
       if constexpr (HasEdotDerivative<Network>::value) {
@@ -84,17 +86,21 @@ class SemiImplicit {
         edot = Network::Edot(y, e, cell, sub);
         dedot_de = EnergyDerivative(y, e, cell, sub, edot);
       }
+      // substep length: the limiting timescales, or all the time left at nsub_max
       const Real t_left = t_end - t_now;
       const Real h = (n >= s.nsub_max - 1)
                          ? t_left
                          : ChooseStep(s, y, e, cell, sub, edot, t_left,
                                       typename Network::StepLimitingSpecies{});
 
+      // energy first (linearized backward Euler), then the species in order, then the
+      // species set by closure (e.g. electrons by charge conservation)
       e = Kokkos::fmax(e + h*edot/(1.0 - h*dedot_de), 0.0);
       if (s.refresh_rates) sub = Network::Prepare(y, e, cell);
       UpdateInOrder(y, y_n, e, cell, sub, h, typename Network::UpdateOrder{});
       Network::Closures(y, y_n, cell);
 
+      // land exactly on t_end on the last substep
       t_now = (h == t_left) ? t_end : t_now + h;
     }
     return n;
@@ -116,6 +122,8 @@ class SemiImplicit {
     return Kokkos::fmin((edot_p - edot)/de, 0.0);
   }
 
+  //! Shortest of: the time left, dt_sub_frac e/|edot|, each step-limiting species'
+  //! limit, and the network's own MaxStep
   template <int... K>
   KOKKOS_INLINE_FUNCTION static Real ChooseStep(const SemiImplicitSettings &s,
                                                 const Real *y, const Real e,
@@ -131,6 +139,7 @@ class SemiImplicit {
     return h;
   }
 
+  //! dt_sub_frac times the timescale max(y_K, yfloor)/|c_K - d_K y_K| of species K
   template <int K>
   KOKKOS_INLINE_FUNCTION static Real LimitBySpecies(const SemiImplicitSettings &s,
                                                     const Real *y, const Real e,
@@ -141,6 +150,7 @@ class SemiImplicit {
            (Kokkos::fabs(r.c - y[K]*r.d) + SMALL);
   }
 
+  //! Update the species K... one after another (Gauss-Seidel order)
   template <int... K>
   KOKKOS_INLINE_FUNCTION static void UpdateInOrder(Real *y, const Real *y_n, const Real e,
                                                    const Cell &cell, const Substep &sub,
@@ -149,6 +159,7 @@ class SemiImplicit {
     (UpdateSpecies<K>(y, y_n, e, cell, sub, h), ...);
   }
 
+  //! One backward Euler step of species K, or the network's own update for a block
   template <int K>
   KOKKOS_INLINE_FUNCTION static void UpdateSpecies(Real *y, const Real *y_n, const Real e,
                                                    const Cell &cell, const Substep &sub,
@@ -171,9 +182,6 @@ class SemiImplicit {
   template <class N, int K>
   static constexpr bool HasCustomUpdate() { return CustomUpdateTrait<N, K>::value; }
 
-  //! A network that sets `static constexpr bool EDOT_DERIVATIVE = true` supplies
-  //! EdotWithDerivative(y, e, cell, sub, &dedot_de): edot, and d(edot)/de at fixed
-  //! species, from one evaluation
   //! A network that sets `static constexpr bool MAX_STEP = true` supplies
   //! MaxStep(dt_sub_frac, y, e, cell, sub), its own substep limit [code time]
   template <class N, class = void>
@@ -182,6 +190,9 @@ class SemiImplicit {
   struct HasMaxStep<N, std::void_t<decltype(N::MAX_STEP)>>
       : std::bool_constant<N::MAX_STEP> {};
 
+  //! A network that sets `static constexpr bool EDOT_DERIVATIVE = true` supplies
+  //! EdotWithDerivative(y, e, cell, sub, &dedot_de): edot, and d(edot)/de at fixed
+  //! species, from one evaluation
   template <class N, class = void>
   struct HasEdotDerivative : std::false_type {};
   template <class N>

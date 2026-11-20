@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_DATA_PATH_HPP_
-#define CHEMISTRY2_DATA_PATH_HPP_
+#ifndef CHEMISTRY2_UTIL_DATA_PATH_HPP_
+#define CHEMISTRY2_UTIL_DATA_PATH_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -25,4 +25,4 @@ inline std::string DataPath(const std::string &rel) {
 
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_DATA_PATH_HPP_
+#endif  // CHEMISTRY2_UTIL_DATA_PATH_HPP_

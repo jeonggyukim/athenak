@@ -16,7 +16,7 @@
 
 #include "athena.hpp"
 #include "check.hpp"
-#include "chemistry2/network/gow17_table.hpp"
+#include "chemistry2/network/gow17/gow17_table.hpp"
 
 namespace g = chemistry2::gow17;
 

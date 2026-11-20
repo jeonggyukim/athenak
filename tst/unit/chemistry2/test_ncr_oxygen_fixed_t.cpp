@@ -18,7 +18,7 @@
 
 #include "athena.hpp"
 #include "check.hpp"
-#include "chemistry2/network/ncr_oxygen.hpp"
+#include "chemistry2/network/ncr/ncr_oxygen.hpp"
 #include "chemistry2/solvers/semi_implicit.hpp"
 
 namespace {

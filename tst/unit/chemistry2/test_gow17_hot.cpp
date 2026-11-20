@@ -15,8 +15,8 @@
 
 #include "athena.hpp"
 #include "check.hpp"
-#include "chemistry2/network/gow17.hpp"
-#include "chemistry2/network/ncr_rates.hpp"
+#include "chemistry2/network/gow17/gow17.hpp"
+#include "chemistry2/network/ncr/ncr_rates.hpp"
 
 namespace {
 using Net = chemistry2::GOW17;

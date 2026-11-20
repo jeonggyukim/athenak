@@ -16,7 +16,7 @@
 
 #include "athena.hpp"
 #include "check.hpp"
-#include "chemistry2/network/gow17.hpp"
+#include "chemistry2/network/gow17/gow17.hpp"
 #include "chemistry2/solvers/semi_implicit.hpp"
 
 namespace {

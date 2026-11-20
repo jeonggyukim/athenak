@@ -18,8 +18,8 @@
 //!   src/chemistry/thermo/thermo.hpp.
 
 #include "athena.hpp"
-#include "chemistry2/rates/dual.hpp"
 #include "chemistry2/thermo/interpolation.hpp"
+#include "chemistry2/util/dual.hpp"
 #include "units/units.hpp"
 
 namespace chemistry2 {
@@ -1139,6 +1139,7 @@ class Thermo {
                                                   0.05089};
 };
 
+// constructors of the coefficient sets from T: evaluate the fits once
 template <class S>
 KOKKOS_INLINE_FUNCTION Thermo::CIIRateCoefficientsT<S>::CIIRateCoefficientsT(const Real T)
     : CIIRateCoefficientsT(Thermo::ComputeCII(T)) {}

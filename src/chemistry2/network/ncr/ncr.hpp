@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_NETWORK_NCR_HPP_
-#define CHEMISTRY2_NETWORK_NCR_HPP_
+#ifndef CHEMISTRY2_NETWORK_NCR_NCR_HPP_
+#define CHEMISTRY2_NETWORK_NCR_NCR_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -14,7 +14,9 @@
 //!   2x2 system (Tigris UpdateChemistry), followed by the RAMSES-style closure and the
 //!   free-electron update with the new abundances. The substep is limited by the
 //!   absolute rates of change of x_H2 and x_H+, as in Tigris. Heating and cooling use
-//!   the terms shared with GOW17 (thermo.hpp); the NCR-only terms come in P5b.
+//!   the terms shared with GOW17 (thermo.hpp) and the NCR terms (ionized.hpp,
+//!   h2_cooling_moseley.hpp); above temp_hot0 they hand over to the CIE table
+//!   (hot_gas.hpp).
 
 #include <array>
 #include <stdexcept>
@@ -24,11 +26,9 @@
 
 #include "athena.hpp"
 #include "parameter_input.hpp"
-#include "chemistry2/data_path.hpp"
 #include "chemistry2/inputs/cell_inputs.hpp"
-#include "chemistry2/network/ncr_rates.hpp"
-#include "chemistry2/network/ncr_table.hpp"
-#include "chemistry2/rates/row_table.hpp"
+#include "chemistry2/network/ncr/ncr_rates.hpp"
+#include "chemistry2/network/ncr/ncr_table.hpp"
 #include "chemistry2/network/network_config.hpp"
 #include "chemistry2/network/species_table.hpp"
 #include "chemistry2/thermo/dust.hpp"
@@ -36,7 +36,9 @@
 #include "chemistry2/thermo/h2_cooling_moseley.hpp"
 #include "chemistry2/thermo/ionized.hpp"
 #include "chemistry2/thermo/thermo.hpp"
-#include "chemistry2/unit_factors.hpp"
+#include "chemistry2/util/code_units.hpp"
+#include "chemistry2/util/data_path.hpp"
+#include "chemistry2/util/row_table.hpp"
 #include "units/units.hpp"
 
 namespace chemistry2 {
@@ -83,6 +85,8 @@ struct NCRNetwork {
     bool cool_hyd_cie = false;
   };
 
+  //! Read <chemistry2> NCR_* keys; load the CIE table (and the Voronov fit) and build
+  //! the rate table only when an NCR network is selected
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
     Settings s = ReadValues(pin, b);
     s.temp_hot0 = pin->GetOrAddReal(b, "NCR_temp_hot0", ncr::TEMP_HOT0);
@@ -106,6 +110,8 @@ struct NCRNetwork {
         s.ci_h = rates.Get(1, 1);
       }
     }
+    // table path: everything that depends on T alone goes into rows of the rate table;
+    // analytic path: only the CIE table is kept
     if constexpr (TABLE) {
       s.table = ncr::BuildNCRTable(gow17::ROWS_PER_OCTAVE, selected ? &src : nullptr,
                                    s.coll_ion_hi_voronov ? &s.ci_h : nullptr);
@@ -115,6 +121,7 @@ struct NCRNetwork {
     return s;
   }
 
+  // the plain values of Settings, in member order
   static Settings ReadValues(ParameterInput *pin, const std::string &b) {
     return Settings{pin->GetOrAddReal(b, "NCR_Z_d", 1.0),
                     pin->GetOrAddReal(b, "NCR_Z_g", 1.0),
@@ -132,14 +139,16 @@ struct NCRNetwork {
                     pin->GetOrAddBoolean(b, "NCR_case_A", false)};
   }
 
+  //! Per-cell constants for the whole solve
   struct Cell {
-    Real n_h, inv_n_h, gamma;
-    Real u_time, u_energy, inv_u_energy;
+    Real n_h, inv_n_h, gamma;               // [cm^-3]
+    Real u_time, u_energy, inv_u_energy;    // code units in cgs
     Settings s;
     Real chi, xi_cr, grad_v;  // FUV field [Draine] for PE, C I, CO, H2; CR rate; |grad v|
     Real xi_diss_h2;          // [s^-1]
   };
 
+  //! The Cell from the density and the radiation and CR inputs of one cell
   KOKKOS_INLINE_FUNCTION static Cell MakeCell(const Real rho, const Real gamma,
                                               const Settings &s, const UnitFactors &u,
                                               const CellInputs &in) {
@@ -160,14 +169,20 @@ struct NCRNetwork {
 
   //! Rate coefficients that depend on T alone
   struct TCoef {
-    Real alpha_b, k_coll, alpha_cii, k_ch2p, kgr_fac;
-    Real l9l, l9h, l10l, l10h, ncr_h2, ncr_hi, k1619;
+    Real alpha_b, k_coll, alpha_cii, k_ch2p, kgr_fac;  // H+ and C+ recombination, H
+                                                       // collisional ionization,
+                                                       // C+ + H2, H2-on-grain T factor
+    Real l9l, l9h, l10l, l10h, ncr_h2, ncr_hi;  // H2 collisional dissociation: log10 k
+                                                // at low and high density, critical
+                                                // densities
+    Real k1619;  // H3+ dissociative recombination (electrons from molecular ions)
     Real xe_cie;  // CIE helium and metal electrons, xe_He + Z_g xe_metal
   };
 
   KOKKOS_INLINE_FUNCTION static TCoef Coefficients(const Real T, const Cell &c,
                                                    Slot *slot) {
     TCoef k;
+    // table path: interpolate each column at T (slot keeps the rows for later lookups)
     if constexpr (TABLE) {
       const RowTable &t = c.s.table;
       *slot = t.grid.Locate(T);
@@ -187,6 +202,7 @@ struct NCRNetwork {
       k.xe_cie = t.At(s, gow17::C_CIE + hot::XE_HE) +
                  c.s.zg*t.At(s, gow17::C_CIE + hot::XE_METAL);
     } else {
+      // analytic path: the fits of Tigris ncr_rates.hpp
       k.alpha_b = c.s.case_a ? ncr::AlphaAHII(T) : ncr::AlphaBHII(T);
       k.k_coll = c.s.coll_ion_hi_voronov ? c.s.ci_h.Rate(T) : ncr::CollIonHI(T);
       k.alpha_cii = ncr::AlphaCII(T);
@@ -226,6 +242,7 @@ struct NCRNetwork {
     Slot slot;  // table rows of T (TABLE only)
   };
 
+  //! T [K] from the internal energy density e (code units) and the particle count
   KOKKOS_INLINE_FUNCTION static Real Temperature(const Real *y, const Real e,
                                                  const Cell &c) {
     return e*c.u_energy*c.inv_n_h/
@@ -236,6 +253,8 @@ struct NCRNetwork {
   KOKKOS_INLINE_FUNCTION static Real XCII(const Real x_e, const Real x_h2, const Real T,
                                           const Real lnT, const Cell &c,
                                           const TCoef &tc) {
+    // C ionization by CRs and FUV (plus CR-induced H2 emission), against recombination
+    // with electrons, on grains, and C+ + H2
     const Real n_h = c.n_h;
     const Real k_cr = 3.85*c.xi_cr;
     Real k_ph = 3.5e-10*c.chi;
@@ -263,6 +282,8 @@ struct NCRNetwork {
   //! x_CO (Tigris CalculateCOAbundance), chi_CO = chi
   KOKKOS_INLINE_FUNCTION static Real XCO(const Real x_h2, const Real x_cii,
                                          const Real x_oii, const Cell &c) {
+    // critical density for CO formation (Gong et al. 2017 fit); CO takes the fraction
+    // 2 x_H2/(1 + (n_crit/n_H)^2) of the limiting element
     const Real k16 = c.xi_cr*1.0e16;
     const Real t1 = Kokkos::fmax(4.0e3*c.s.zd/(k16*k16), 1.0);
     const Real ncrit = Kokkos::pow(t1, Kokkos::cbrt(c.chi))*
@@ -275,6 +296,8 @@ struct NCRNetwork {
   KOKKOS_INLINE_FUNCTION static void SetClosures(const Real *y, const Real T,
                                                  const Real lnT, const Cell &c,
                                                  Substep &sub) {
+    // C+ first, O+ follows H+ by charge exchange, CO from both, then the neutral
+    // remainders of C and O
     sub.x_cii = XCII(y[IE], y[IH2], T, lnT, c, sub.tc);
     const Real x_oii = y[IH_PLUS]*ncr::X_O_STD*c.s.zg;
     sub.x_co = XCO(y[IH2], sub.x_cii, x_oii, c);
@@ -282,6 +305,8 @@ struct NCRNetwork {
     sub.x_oi = Kokkos::fmax(ncr::X_O_STD*c.s.zg - x_oii - sub.x_co, ncr::TINY);
   }
 
+  //! Everything a substep needs at the current state: T, H I, the T-only coefficients,
+  //! the closures, and the creation and destruction rates of H+ and H2
   KOKKOS_INLINE_FUNCTION static Substep Prepare(const Real *y, const Real e,
                                                 const Cell &c) {
     Substep sub;
@@ -294,7 +319,8 @@ struct NCRNetwork {
     const TCoef &tc = sub.tc;
     SetClosures(y, T, lnT, c, sub);
     const Real n_h = c.n_h, n_e = y[IE]*n_h;
-    // H+
+    // H+: created by collisional and CR ionization of H I, destroyed by radiative and
+    // grain recombination (grain recombination fades out across the hot window)
     sub.k_coll_hi = tc.k_coll;
     Real a_gr = 0.0;
     if (T < c.s.temp_hot1) {
@@ -309,7 +335,9 @@ struct NCRNetwork {
     const Real xi_h = c.xi_cr*(2.3*y[IH2] + 1.5*sub.x_hi);
     sub.c_hii = sub.k_coll_hi*n_e + xi_h;
     sub.d_hii = n_e*tc.alpha_b + n_h*a_gr;
-    // H2
+    // H2: formed on grains, destroyed by collisions with H and H2 (rate interpolated
+    // between low- and high-density limits by the critical density), by CRs and by
+    // FUV photodissociation; no H2 above temp_hot1
     sub.k_h2_h = 0.0;
     sub.k_h2_h2 = 0.0;
     if (T < c.s.temp_hot1) {
@@ -321,6 +349,7 @@ struct NCRNetwork {
         sub.k_h2_h = Kokkos::pow(10.0, tc.l9h*w + tc.l9l*w0);
         sub.k_h2_h2 = Kokkos::pow(10.0, tc.l10h*w + tc.l10l*w0);
       }
+      // creation per H I (grains) and total destruction rate [s^-1]
       const Real xi_coll = (sub.k_h2_h2*y[IH2] + sub.k_h2_h*sub.x_hi)*n_h;
       sub.c_h2 = sub.kgr*n_h;
       sub.d_h2 = 1.65*2.0*xi_h + c.xi_diss_h2 + xi_coll;
@@ -340,9 +369,11 @@ struct NCRNetwork {
                                                    const Cell &c, const TCoef &tc) {
     const Real lnT = Kokkos::log(T);
     const Real x_cii = XCII(x_e_old, x_h2, T, lnT, c, tc);
+    // cold and warm gas: H+, C+, O+ (following H+) and molecular ions
     if (T <= c.s.temp_hot0) {
       return x_hii + x_cii + x_hii*ncr::X_O_STD*c.s.zg + XeMol(x_e_old, x_h2, c, tc);
     }
+    // hot window and above: blend the metal part toward CIE
     const Real w = hot::Weight<Real>(T, c.s.temp_hot0, c.s.temp_hot1);
     const Real cold = x_cii + x_hii*ncr::X_O_STD*c.s.zg + XeMol(x_e_old, x_h2, c, tc);
     return x_hii + (1.0 - w)*cold + w*tc.xe_cie;
@@ -371,6 +402,7 @@ struct NCRNetwork {
                                             const Cell &cl, const Substep &sub,
                                             const Real h) {
     static_assert(K == IH2, "NCR's only custom update is the H2/H+ block");
+    // the 2x2 system [a b; c d] (x_H2, x_H+) = (e, f) of the backward Euler step
     const Real dt = h*cl.u_time;
     const Real a = 1.0 + (2.0*sub.c_h2 + sub.d_h2)*dt;
     const Real b = sub.c_h2*dt;
@@ -378,9 +410,11 @@ struct NCRNetwork {
     const Real d = 1.0 + (sub.c_hii + sub.d_hii)*dt;
     const Real e = y_n[IH2] + sub.c_h2*dt;
     const Real f = y_n[IH_PLUS] + sub.c_hii*dt;
+    // solve by Cramer's rule; no H2 above temp_hot1
     const Real inv_det = 1.0/(a*d - b*c);
     Real x_hii = Kokkos::fmax(Kokkos::fmin((a*f - c*e)*inv_det, 1.0), ncr::TINY);
     Real x_h2 = (sub.T < cl.s.temp_hot1) ? (d*e - b*f)*inv_det : 0.0;
+    // keep x_H+ + 2 x_H2 <= 1 and both positive, clipping the minor species first
     const Real sum = x_hii + 2.0*x_h2;
     if (sum > 1.0) {
       x_hii /= sum;
@@ -393,6 +427,7 @@ struct NCRNetwork {
       x_hii = Kokkos::fmin(Kokkos::fmax(x_hii, ncr::TINY), 1.0);
       x_h2 = Kokkos::fmin(Kokkos::fmax(x_h2, ncr::TINY), 1.0 - x_hii);
     }
+    // store, then the electrons from the new abundances
     y[IH2] = x_h2;
     y[IH_PLUS] = x_hii;
     y[IE] = FreeElectrons(y_n[IE], x_h2, x_hii, sub.T, cl, sub.tc);
@@ -419,11 +454,12 @@ struct NCRNetwork {
     return c.u_time*((hc.heating - hc.cooling)*c.n_h*c.inv_u_energy);
   }
 
-  //! The heating and cooling terms shared with GOW17
+  //! Heating and cooling [erg s^-1 per H] at the current state
   KOKKOS_INLINE_FUNCTION static HeatCool HeatingCooling(const Real *y, const Real e,
                                                         const Cell &c,
                                                         const Substep &sub) {
     const Real T = Kokkos::fmax(Temperature(y, e, c), 1.0);
+    // table path: the same terms with T-only factors from the rate table
     if constexpr (TABLE) {
       const HeatCoolT<Real> hc = HeatCoolTable<Real>(y, T, 1.0, c, sub);
       return HeatCool{hc.heating, hc.cooling};
@@ -431,6 +467,8 @@ struct NCRNetwork {
     const Real n_h = c.n_h, x_e = y[IE], x_h2 = y[IH2], x_hi = sub.x_hi;
     const Real n_hi = n_h*x_hi, n_h2 = n_h*x_h2, n_e = n_h*x_e;
     const Real k_ph_h2 = c.xi_diss_h2;
+    // heating: cosmic rays, photoelectric, H2 formation on grains, UV pumping and
+    // photodissociation of H2
     Real heating = Thermo::HeatingCR(x_e, n_h, x_hi, x_h2, c.xi_cr);
     heating += Thermo::HeatingPE(c.chi, c.s.zd, T, n_e);
     heating += Thermo::HeatingH2gr(x_hi, x_h2, n_h, T, sub.kgr*n_h, k_ph_h2);
@@ -454,6 +492,8 @@ struct NCRNetwork {
     if (c.s.dust_cooling) {
       other += dust::GasToDust(n_h, T, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
     }
+    // hydrogen cooling: Ly-alpha, H2 rovibrational lines, H II recombination and
+    // free-free, H2 collisional dissociation, H I collisional ionization
     Real cooling = 0.0;
     if (T > 3.0e3) cooling += Thermo::CoolingLya(x_hi, n_e, T);
     if (c.s.h2_rovib_cooling && T < c.s.temp_hot1) {
@@ -462,6 +502,7 @@ struct NCRNetwork {
     cooling += ionized::CoolingHII(x_e, y[IH_PLUS], n_h, T, ncr::AlphaBHII(T));
     cooling += Thermo::CoolingH2diss(x_hi, x_h2, sub.k_h2_h*n_h, sub.k_h2_h2*n_h);
     cooling += Thermo::CoolingHIion(x_hi, x_e, sub.k_coll_hi*n_h);
+    // hot gas: blend toward the CIE helium and metal (and optionally hydrogen) cooling
     if (T > c.s.temp_hot0) {
       Real lam = 0.0;
       if (c.s.cie.n > 0) {
@@ -506,7 +547,9 @@ struct NCRNetwork {
                        Thermo::CvCold(y[IH2], c.s.x_he, y[IE], c.gamma);
     const Real T_raw = e*dT_de;
     const Real T = Kokkos::fmax(T_raw, 1.0);
+    // d/dT is zero where the floor T = 1 K holds
     const Real seed = (T_raw >= 1.0) ? 1.0 : 0.0;
+    // one dual-number pass gives the rates and their d/dT; chain rule to d/de
     const auto hc = HeatCoolTable<dual::Dual>(y, T, seed, c, sub);
     const Real fac = c.u_time*c.n_h*c.inv_u_energy;
     *dedot_de = fac*(hc.heating.d - hc.cooling.d)*dT_de;
@@ -527,6 +570,8 @@ struct NCRNetwork {
                                                            const Substep &sub) {
     constexpr bool DERIV = std::is_same_v<S, dual::Dual>;
     const RowTable &tab = c.s.table;
+    // table rows around T (reuse the substep's rows when T is unchanged); dw carries
+    // d(interpolation weight)/dT for the derivative
     Real dw = 0.0;
     Slot s_t;
     if constexpr (DERIV) {
@@ -541,6 +586,7 @@ struct NCRNetwork {
     } else {
       Ts = T;
     }
+    // column k of the table at T (value, and d/dT when S is dual)
     auto col = [&](const int k) { return gow17::RowCoef<S>(tab, s_t, dw, k); };
     const Real n_h = c.n_h, x_e = y[IE], x_h2 = y[IH2], x_hi = sub.x_hi;
     const Real x_hii = y[IH_PLUS];
@@ -634,4 +680,4 @@ using NCRAnalytic = NCRNetwork<false>;
 
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_NETWORK_NCR_HPP_
+#endif  // CHEMISTRY2_NETWORK_NCR_NCR_HPP_

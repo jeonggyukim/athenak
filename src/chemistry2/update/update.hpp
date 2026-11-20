@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_UPDATE_HPP_
-#define CHEMISTRY2_UPDATE_HPP_
+#ifndef CHEMISTRY2_UPDATE_UPDATE_HPP_
+#define CHEMISTRY2_UPDATE_UPDATE_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -22,12 +22,14 @@
 
 namespace chemistry2 {
 
+// copy the N species abundances of cell (m,k,j,i) from the passive scalars into y
 template <int N>
 KOKKOS_INLINE_FUNCTION void LoadSpecies(const DvceArray5D<Real> &w0, int m, int first,
                                         int k, int j, int i, Real *y) {
   for (int n = 0; n < N; ++n) y[n] = w0(m, first + n, k, j, i);
 }
 
+// write y back to the passive scalars of cell (m,k,j,i)
 template <int N>
 KOKKOS_INLINE_FUNCTION void StoreSpecies(const DvceArray5D<Real> &w0, int m, int first,
                                          int k, int j, int i, const Real *y) {
@@ -52,6 +54,7 @@ KOKKOS_INLINE_FUNCTION Real VelocityGradient(const DvceArray5D<Real> &w0, int m,
   return 0.5*sum/n_dim;
 }
 
+// the settings of network Net among those read from <chemistry2>
 template <class Net>
 const typename Net::Settings &SettingsOf(const NetworkSettings &s) {
   if constexpr (std::is_same_v<Net, H2>) {
@@ -69,12 +72,15 @@ const typename Net::Settings &SettingsOf(const NetworkSettings &s) {
   }
 }
 
+//! Advance the chemistry and internal energy of every active cell from t over dt with
+//! the network/solver pair Pair
 template <class Pair>
 void Chemistry2::Update(const Real t, const Real dt) {
   using Net = typename Pair::Network;
   using Solver = typename Pair::Integrator;
   constexpr int NSPEC = Net::NSPEC;
 
+  // copy everything the kernel needs into locals (captured by value on the device)
   const auto w0 = is_mhd_ ? pmy_pack_->pmhd->w0 : pmy_pack_->phydro->w0;
   const Real gamma = is_mhd_ ? pmy_pack_->pmhd->peos->eos_data.gamma
                              : pmy_pack_->phydro->peos->eos_data.gamma;
@@ -97,15 +103,18 @@ void Chemistry2::Update(const Real t, const Real dt) {
   par_for("chemistry2", DevExeSpace(), 0, pmy_pack_->nmb_thispack - 1, indcs.ks,
           indcs.ke, indcs.js, indcs.je, indcs.is, indcs.ie,
           KOKKOS_LAMBDA(const int m, const int k, const int j, const int i) {
+    // load the cell: abundances, internal energy, radiation and CR inputs, |grad v|
     Real y[NSPEC];  // NOLINT(runtime/arrays)
     LoadSpecies<NSPEC>(w0, m, first, k, j, i, y);
     Real e = w0(m, IEN, k, j, i);
     CellInputs in = inputs.Load(m, k, j, i);
     in.grad_v = VelocityGradient(w0, m, k, j, i, sizes(m), multi_d, three_d)*
                 inv_time_cgs;
+    // the per-cell constants of the network (n_H, unit factors, fields), then the solve
     const typename Net::Cell cell = Net::MakeCell(w0(m, IDN, k, j, i), gamma, net,
                                                   units, in);
     Solver::Solve(solver, cell, t, dt, y, e);
+    // store the new abundances and internal energy
     StoreSpecies<NSPEC>(w0, m, first, k, j, i, y);
     w0(m, IEN, k, j, i) = e;
   });
@@ -113,4 +122,4 @@ void Chemistry2::Update(const Real t, const Real dt) {
 
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_UPDATE_HPP_
+#endif  // CHEMISTRY2_UPDATE_UPDATE_HPP_
