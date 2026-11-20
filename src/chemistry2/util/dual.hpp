@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_RATES_DUAL_HPP_
-#define CHEMISTRY2_RATES_DUAL_HPP_
+#ifndef CHEMISTRY2_UTIL_DUAL_HPP_
+#define CHEMISTRY2_UTIL_DUAL_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -148,4 +148,4 @@ KOKKOS_INLINE_FUNCTION Real Value(const Dual a) { return a.v; }
 }  // namespace dual
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_RATES_DUAL_HPP_
+#endif  // CHEMISTRY2_UTIL_DUAL_HPP_

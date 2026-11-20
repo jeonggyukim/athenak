@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_RATES_ROW_TABLE_HPP_
-#define CHEMISTRY2_RATES_ROW_TABLE_HPP_
+#ifndef CHEMISTRY2_UTIL_ROW_TABLE_HPP_
+#define CHEMISTRY2_UTIL_ROW_TABLE_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -114,4 +114,4 @@ RowTable BuildRowTable(const RowGrid &grid, const int n_cols, F fill) {
 
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_RATES_ROW_TABLE_HPP_
+#endif  // CHEMISTRY2_UTIL_ROW_TABLE_HPP_

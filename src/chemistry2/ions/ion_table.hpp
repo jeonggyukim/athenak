@@ -19,7 +19,7 @@
 #include "chemistry2/ions/rates/ct_rate.hpp"
 #include "chemistry2/ions/rates/ion_threshold.hpp"
 #include "chemistry2/ions/rates/recomb_rate.hpp"
-#include "chemistry2/rates/row_table.hpp"
+#include "chemistry2/util/row_table.hpp"
 
 namespace chemistry2 {
 namespace ions {

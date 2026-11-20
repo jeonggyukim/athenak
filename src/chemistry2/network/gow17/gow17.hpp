@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_NETWORK_GOW17_HPP_
-#define CHEMISTRY2_NETWORK_GOW17_HPP_
+#ifndef CHEMISTRY2_NETWORK_GOW17_GOW17_HPP_
+#define CHEMISTRY2_NETWORK_GOW17_GOW17_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -21,18 +21,18 @@
 
 #include "athena.hpp"
 #include "parameter_input.hpp"
-#include "chemistry2/data_path.hpp"
 #include "chemistry2/inputs/cell_inputs.hpp"
 #include "chemistry2/ions/rates/coll_ion_rate.hpp"
 #include "chemistry2/ions/rates/ion_threshold.hpp"
-#include "chemistry2/network/gow17_rates.hpp"
-#include "chemistry2/network/gow17_table.hpp"
+#include "chemistry2/network/gow17/gow17_rates.hpp"
+#include "chemistry2/network/gow17/gow17_table.hpp"
 #include "chemistry2/network/network_config.hpp"
 #include "chemistry2/network/species_table.hpp"
 #include "chemistry2/thermo/dust.hpp"
 #include "chemistry2/thermo/ionized.hpp"
 #include "chemistry2/thermo/thermo.hpp"
-#include "chemistry2/unit_factors.hpp"
+#include "chemistry2/util/code_units.hpp"
+#include "chemistry2/util/data_path.hpp"
 #include "units/units.hpp"
 
 namespace chemistry2 {
@@ -660,4 +660,4 @@ using GOW17Analytic = GOW17Network<false>;
 
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_NETWORK_GOW17_HPP_
+#endif  // CHEMISTRY2_NETWORK_GOW17_GOW17_HPP_

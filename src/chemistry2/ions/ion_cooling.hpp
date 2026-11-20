@@ -20,7 +20,7 @@
 #include <vector>
 
 #include "athena.hpp"
-#include "chemistry2/rates/row_table.hpp"
+#include "chemistry2/util/row_table.hpp"
 
 namespace chemistry2 {
 namespace ions {

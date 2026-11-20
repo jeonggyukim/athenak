@@ -11,7 +11,7 @@
 //!        (T - T_d), negative where the dust is the warmer.
 
 #include "athena.hpp"
-#include "chemistry2/rates/dual.hpp"
+#include "chemistry2/util/dual.hpp"
 
 namespace chemistry2 {
 namespace dust {

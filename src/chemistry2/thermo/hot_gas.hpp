@@ -32,7 +32,7 @@
 #include <vector>
 
 #include "athena.hpp"
-#include "chemistry2/rates/dual.hpp"
+#include "chemistry2/util/dual.hpp"
 
 namespace chemistry2 {
 namespace hot {

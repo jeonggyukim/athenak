@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_NETWORK_NCR_HPP_
-#define CHEMISTRY2_NETWORK_NCR_HPP_
+#ifndef CHEMISTRY2_NETWORK_NCR_NCR_HPP_
+#define CHEMISTRY2_NETWORK_NCR_NCR_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -26,11 +26,9 @@
 
 #include "athena.hpp"
 #include "parameter_input.hpp"
-#include "chemistry2/data_path.hpp"
 #include "chemistry2/inputs/cell_inputs.hpp"
-#include "chemistry2/network/ncr_rates.hpp"
-#include "chemistry2/network/ncr_table.hpp"
-#include "chemistry2/rates/row_table.hpp"
+#include "chemistry2/network/ncr/ncr_rates.hpp"
+#include "chemistry2/network/ncr/ncr_table.hpp"
 #include "chemistry2/network/network_config.hpp"
 #include "chemistry2/network/species_table.hpp"
 #include "chemistry2/thermo/dust.hpp"
@@ -38,7 +36,9 @@
 #include "chemistry2/thermo/h2_cooling_moseley.hpp"
 #include "chemistry2/thermo/ionized.hpp"
 #include "chemistry2/thermo/thermo.hpp"
-#include "chemistry2/unit_factors.hpp"
+#include "chemistry2/util/code_units.hpp"
+#include "chemistry2/util/data_path.hpp"
+#include "chemistry2/util/row_table.hpp"
 #include "units/units.hpp"
 
 namespace chemistry2 {
@@ -680,4 +680,4 @@ using NCRAnalytic = NCRNetwork<false>;
 
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_NETWORK_NCR_HPP_
+#endif  // CHEMISTRY2_NETWORK_NCR_NCR_HPP_

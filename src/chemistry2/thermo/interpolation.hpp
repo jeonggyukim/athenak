@@ -9,7 +9,7 @@
 //! \brief Linear interpolation in the small tables of the heating and cooling terms.
 
 #include "athena.hpp"
-#include "chemistry2/rates/dual.hpp"
+#include "chemistry2/util/dual.hpp"
 
 namespace chemistry2 {
 namespace interpolation {

@@ -22,7 +22,7 @@
 
 #include "athena.hpp"
 #include "check.hpp"
-#include "chemistry2/network/ncr.hpp"
+#include "chemistry2/network/ncr/ncr.hpp"
 
 namespace {
 using Net = chemistry2::NCRAnalytic;  // the fits, as Tigris interp_mode 0

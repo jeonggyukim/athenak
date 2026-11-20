@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_NETWORK_NCR_OXYGEN_HPP_
-#define CHEMISTRY2_NETWORK_NCR_OXYGEN_HPP_
+#ifndef CHEMISTRY2_NETWORK_NCR_NCR_OXYGEN_HPP_
+#define CHEMISTRY2_NETWORK_NCR_NCR_OXYGEN_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -22,11 +22,11 @@
 #include <vector>
 
 #include "athena.hpp"
-#include "chemistry2/data_path.hpp"
 #include "chemistry2/ions/ion_cooling.hpp"
 #include "chemistry2/ions/ion_ladder.hpp"
 #include "chemistry2/ions/ion_table.hpp"
-#include "chemistry2/network/ncr.hpp"
+#include "chemistry2/network/ncr/ncr.hpp"
+#include "chemistry2/util/data_path.hpp"
 
 namespace chemistry2 {
 
@@ -217,4 +217,4 @@ struct NCROxygen {
 
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_NETWORK_NCR_OXYGEN_HPP_
+#endif  // CHEMISTRY2_NETWORK_NCR_NCR_OXYGEN_HPP_

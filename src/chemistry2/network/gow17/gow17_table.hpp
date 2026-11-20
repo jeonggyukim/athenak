@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_NETWORK_GOW17_TABLE_HPP_
-#define CHEMISTRY2_NETWORK_GOW17_TABLE_HPP_
+#ifndef CHEMISTRY2_NETWORK_GOW17_GOW17_TABLE_HPP_
+#define CHEMISTRY2_NETWORK_GOW17_GOW17_TABLE_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -12,11 +12,11 @@
 
 #include "athena.hpp"
 #include "chemistry2/ions/rates/coll_ion_rate.hpp"
-#include "chemistry2/network/gow17_rates.hpp"
-#include "chemistry2/rates/row_table.hpp"
+#include "chemistry2/network/gow17/gow17_rates.hpp"
 #include "chemistry2/thermo/hot_gas.hpp"
 #include "chemistry2/thermo/ionized.hpp"
 #include "chemistry2/thermo/thermo.hpp"
+#include "chemistry2/util/row_table.hpp"
 
 namespace chemistry2 {
 namespace gow17 {
@@ -224,4 +224,4 @@ KOKKOS_INLINE_FUNCTION GOW17ThermoCoefficients<S> LookupThermo(const RowTable &t
 }  // namespace gow17
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_NETWORK_GOW17_TABLE_HPP_
+#endif  // CHEMISTRY2_NETWORK_GOW17_GOW17_TABLE_HPP_

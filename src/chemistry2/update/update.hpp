@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_UPDATE_HPP_
-#define CHEMISTRY2_UPDATE_HPP_
+#ifndef CHEMISTRY2_UPDATE_UPDATE_HPP_
+#define CHEMISTRY2_UPDATE_UPDATE_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -122,4 +122,4 @@ void Chemistry2::Update(const Real t, const Real dt) {
 
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_UPDATE_HPP_
+#endif  // CHEMISTRY2_UPDATE_UPDATE_HPP_

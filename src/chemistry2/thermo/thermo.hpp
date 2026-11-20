@@ -18,8 +18,8 @@
 //!   src/chemistry/thermo/thermo.hpp.
 
 #include "athena.hpp"
-#include "chemistry2/rates/dual.hpp"
 #include "chemistry2/thermo/interpolation.hpp"
+#include "chemistry2/util/dual.hpp"
 #include "units/units.hpp"
 
 namespace chemistry2 {

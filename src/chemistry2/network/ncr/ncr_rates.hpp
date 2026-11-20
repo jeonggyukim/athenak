@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_NETWORK_NCR_RATES_HPP_
-#define CHEMISTRY2_NETWORK_NCR_RATES_HPP_
+#ifndef CHEMISTRY2_NETWORK_NCR_NCR_RATES_HPP_
+#define CHEMISTRY2_NETWORK_NCR_NCR_RATES_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -65,4 +65,4 @@ KOKKOS_INLINE_FUNCTION Real GrainRec(const Real *c, const Real T, const Real lnT
 }  // namespace ncr
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_NETWORK_NCR_RATES_HPP_
+#endif  // CHEMISTRY2_NETWORK_NCR_NCR_RATES_HPP_

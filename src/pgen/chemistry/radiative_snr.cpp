@@ -43,7 +43,7 @@
 #include "pgen/pgen.hpp"
 #include "units/units.hpp"
 #include "chemistry2/chemistry2.hpp"
-#include "chemistry2/network/ncr_rates.hpp"
+#include "chemistry2/network/ncr/ncr_rates.hpp"
 #include "chemistry2/registry.hpp"
 
 namespace {

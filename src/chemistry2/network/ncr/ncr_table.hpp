@@ -1,5 +1,5 @@
-#ifndef CHEMISTRY2_NETWORK_NCR_TABLE_HPP_
-#define CHEMISTRY2_NETWORK_NCR_TABLE_HPP_
+#ifndef CHEMISTRY2_NETWORK_NCR_NCR_TABLE_HPP_
+#define CHEMISTRY2_NETWORK_NCR_NCR_TABLE_HPP_
 //========================================================================================
 // AthenaXXX astrophysical plasma code
 // Copyright(C) 2020 James M. Stone <jmstone@ias.edu> and the Athena code team
@@ -11,13 +11,13 @@
 //!        rate coefficients and cooling factors. Same grid as the GOW17 table.
 
 #include "athena.hpp"
-#include "chemistry2/network/gow17_table.hpp"
-#include "chemistry2/network/ncr_rates.hpp"
+#include "chemistry2/network/gow17/gow17_table.hpp"
+#include "chemistry2/network/ncr/ncr_rates.hpp"
 #include "units/units.hpp"
-#include "chemistry2/rates/row_table.hpp"
 #include "chemistry2/thermo/h2_cooling_moseley.hpp"
 #include "chemistry2/thermo/hot_gas.hpp"
 #include "chemistry2/thermo/ionized.hpp"
+#include "chemistry2/util/row_table.hpp"
 
 namespace chemistry2 {
 namespace ncr {
@@ -80,4 +80,4 @@ inline RowTable BuildNCRTable(const int rows_per_octave = gow17::ROWS_PER_OCTAVE
 }  // namespace ncr
 }  // namespace chemistry2
 
-#endif  // CHEMISTRY2_NETWORK_NCR_TABLE_HPP_
+#endif  // CHEMISTRY2_NETWORK_NCR_NCR_TABLE_HPP_

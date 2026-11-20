@@ -17,13 +17,13 @@
 #include "parameter_input.hpp"
 #include "tasklist/task_list.hpp"
 #include "chemistry2/inputs/cell_inputs.hpp"
-#include "chemistry2/network/gow17.hpp"
+#include "chemistry2/network/gow17/gow17.hpp"
 #include "chemistry2/network/h2.hpp"
-#include "chemistry2/network/ncr.hpp"
-#include "chemistry2/network/ncr_oxygen.hpp"
+#include "chemistry2/network/ncr/ncr.hpp"
+#include "chemistry2/network/ncr/ncr_oxygen.hpp"
 #include "chemistry2/solvers/kokkos_bdf.hpp"
 #include "chemistry2/solvers/semi_implicit.hpp"
-#include "chemistry2/unit_factors.hpp"
+#include "chemistry2/util/code_units.hpp"
 
 class MeshBlockPack;
 class Driver;
