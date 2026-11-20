@@ -298,6 +298,7 @@ configure_file(config.hpp.in config.hpp)
 if (Athena_ENABLE_UNIT_TESTS)
   enable_testing()
   add_subdirectory(tst/unit)
+  add_subdirectory(tst/tools)
 endif()
 
 install( TARGETS athena DESTINATION bin )

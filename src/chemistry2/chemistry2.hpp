@@ -48,6 +48,7 @@ struct NetworkSettings {
   GOW17::Settings gow17;
   GOW17Analytic::Settings gow17_analytic;
   NCR::Settings ncr;
+  NCRAnalytic::Settings ncr_analytic;
   NCROxygen<2>::Settings ncr_oxygen;
 };
 
