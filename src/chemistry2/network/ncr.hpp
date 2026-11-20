@@ -65,6 +65,8 @@ struct NCRNetwork {
     bool dust_cooling;
     Real temp_dust, alpha_gd;
     RowTable table;              // NCR rate table (TABLE only)
+    bool case_a = false;         // H+ recombination: case A instead of B (as Cloudy CIE)
+    bool nebular = true;         // nebular line fit; off when ion ladders cool by line
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
@@ -86,7 +88,8 @@ struct NCRNetwork {
                     pin->GetOrAddBoolean(b, "NCR_H2_rovib_cooling", true),
                     pin->GetOrAddBoolean(b, "NCR_dust_cooling", false),
                     pin->GetOrAddReal(b, "NCR_dust_temperature", 10.0),
-                    pin->GetOrAddReal(b, "NCR_alpha_gd", 0.0), RowTable()};
+                    pin->GetOrAddReal(b, "NCR_alpha_gd", 0.0), RowTable(),
+                    pin->GetOrAddBoolean(b, "NCR_case_A", false)};
   }
 
   struct Cell {
@@ -128,7 +131,7 @@ struct NCRNetwork {
       const RowTable &t = c.s.table;
       *slot = t.grid.Locate(T);
       const Slot &s = *slot;
-      k.alpha_b = t.At(s, ncr::C_ALPHA_B);
+      k.alpha_b = t.At(s, c.s.case_a ? ncr::C_ALPHA_A : ncr::C_ALPHA_B);
       k.k_coll = t.At(s, ncr::C_K_COLL_HI);
       k.alpha_cii = t.At(s, ncr::C_ALPHA_CII);
       k.k_ch2p = t.At(s, ncr::C_K_CH2P);
@@ -141,7 +144,7 @@ struct NCRNetwork {
       k.ncr_hi = t.At(s, ncr::C_NCR_HI);
       k.k1619 = t.At(s, ncr::C_K1619);
     } else {
-      k.alpha_b = ncr::AlphaBHII(T);
+      k.alpha_b = c.s.case_a ? ncr::AlphaAHII(T) : ncr::AlphaBHII(T);
       k.k_coll = ncr::CollIonHI(T);
       k.alpha_cii = ncr::AlphaCII(T);
       k.k_ch2p = 3.3e-13*Kokkos::pow(T, -1.3)*Kokkos::exp(-23.0/T);
@@ -395,7 +398,7 @@ struct NCRNetwork {
       cooling += ncr_terms::CoolingH2Moseley(x_h2, x_hi, n_h, T);
     }
     cooling += ncr_terms::CoolingHII(x_e, y[IH_PLUS], n_h, T, ncr::AlphaBHII(T));
-    if (T < c.s.temp_hot1) {
+    if (c.s.nebular && T < c.s.temp_hot1) {
       cooling += ncr_terms::CoolingNebular(x_e, y[IH_PLUS], n_h, T, c.s.zg);
     }
     cooling += Thermo::CoolingRec(c.s.zd, T, n_e, c.chi);
@@ -503,7 +506,7 @@ struct NCRNetwork {
                   col(ncr::C_MOS + 3)*d4)*x_h2;
     }
     cooling += (col(ncr::C_HII_FF) + col(ncr::C_HII_REC))*(n_h*x_e*x_hii);
-    if (T < c.s.temp_hot1) {  // nebular lines
+    if (c.s.nebular && T < c.s.temp_hot1) {  // nebular lines
       const S l = dual::log(Ts*1e-4);
       const S f_red = 1.0/(1.0 + 0.12*dual::pow(x_e*n_h*1e-2, 0.38 - 0.12*l));
       cooling += col(ncr::C_NEB)*f_red*(3.677602203699553e-21*c.s.zg*x_hii*x_e*n_h);

@@ -27,6 +27,13 @@ KOKKOS_INLINE_FUNCTION Real AlphaBHII(const Real T) {
   return 2.753e-14*Kokkos::pow(bb, 1.5)*Kokkos::pow(1.0 + Kokkos::pow(cc, 0.407), -2.242);
 }
 
+//! Case A recombination coefficient of H+ [cm^3 s^-1] (Hui & Gnedin 1997)
+KOKKOS_INLINE_FUNCTION Real AlphaAHII(const Real T) {
+  const Real lam = 315614.0/T;
+  return 1.269e-13*Kokkos::pow(lam, 1.503)/
+         Kokkos::pow(1.0 + Kokkos::pow(lam/0.522, 0.470), 1.923);
+}
+
 //! Collisional ionization of H I by electrons [cm^3 s^-1], zero below 3000 K
 KOKKOS_INLINE_FUNCTION Real CollIonHI(const Real T) {
   if (T <= 3.0e3) return 0.0;

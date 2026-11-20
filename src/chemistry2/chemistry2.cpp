@@ -69,7 +69,8 @@ Chemistry2::Chemistry2(MeshBlockPack *ppack, ParameterInput *pin)
       networks_{H2::ReadSettings(pin, "chemistry2"),
                 GOW17::ReadSettings(pin, "chemistry2"),
                 GOW17Analytic::ReadSettings(pin, "chemistry2"),
-                NCR::ReadSettings(pin, "chemistry2")},
+                NCR::ReadSettings(pin, "chemistry2"),
+                NCROxygen<2>::ReadSettings(pin, "chemistry2")},
       inputs_(InputSource::Read(pin, "chemistry2")) {
   if (pin->DoesBlockExist("chemistry")) {
     Fatal("<chemistry> and <chemistry2> cannot both be used");

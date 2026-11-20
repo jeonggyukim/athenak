@@ -35,11 +35,13 @@ int main(int argc, char *argv[]) {
   report.Expect(chemistry2::Find("GOW17", "kokkos_BDF") == 3, "Find GOW17 + kokkos_BDF");
   report.Expect(chemistry2::List() == "H2 + semi_implicit, GOW17 + semi_implicit, "
                                       "GOW17_analytic + semi_implicit, "
-                                      "GOW17 + kokkos_BDF, NCR + semi_implicit",
+                                      "GOW17 + kokkos_BDF, NCR + semi_implicit, "
+                                      "NCR_oxygen + semi_implicit",
                 "List: " + chemistry2::List());
   report.Expect(chemistry2::SpeciesCount("GOW17") == 12 &&
                 chemistry2::SpeciesCount("H2") == 2 &&
                 chemistry2::SpeciesCount("NCR") == 3 &&
+                chemistry2::SpeciesCount("NCR_oxygen") == 5 &&
                 chemistry2::SpeciesCount("NL99") == -1, "SpeciesCount");
 
   bool called_h2 = false;
