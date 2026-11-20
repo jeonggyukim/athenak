@@ -80,10 +80,13 @@ struct GOW17Network {
     bool dust_cooling = false;
     Real temp_dust = 10.0;
     Real alpha_gd = 0.0;
+    // He I + e -> He+ + 2e (Tigris, not in GOW17); off for parity with src/chemistry
+    bool he_coll_ion = true;
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
     Settings s = ReadValues(pin, b);
+    s.he_coll_ion = pin->GetOrAddBoolean(b, "GOW17_he_coll_ion", true);
     if constexpr (TABLE) s.table = gow17::BuildGOW17Table(s.kgr_h2_const);
     return s;
   }
@@ -256,6 +259,9 @@ struct GOW17Network {
       cooling += Thermo::CoolingH2diss(g.h, y[IH2], r.k2[gow17::I2_H2_H],
                                        r.k2[gow17::I2_H2_H2]);
       cooling += Thermo::CoolingHIion(g.h, g.e, r.k2[gow17::I2_H_E]);
+      if (c.s.he_coll_ion) {  // 24.587 eV per He I ionization
+        cooling += gow17::CHI_HEI_ERG*r.k2[gow17::I2_HE_E]*g.e*g.he;
+      }
       if (c.s.dust_cooling) {
         cooling += dust::GasToDust(n_h, T, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
       }
@@ -388,6 +394,11 @@ struct GOW17Network {
       }
       cooling += Thermo::CoolingH2diss(g.h, y[IH2], k_h2_h, k_h2_h2);
       cooling += Thermo::CoolingHIion(g.h, g.e, k_h_e);
+      if (c.s.he_coll_ion) {  // 24.587 eV per He I ionization; value from Prepare
+        S k_he_e = r.k2[gow17::I2_HE_E];
+        if constexpr (DERIV) k_he_e.d = n_h*col(gow17::C_K2 + gow17::I2_HE_E).d;
+        cooling += gow17::CHI_HEI_ERG*k_he_e*(g.e*g.he);
+      }
       if (c.s.dust_cooling) {
         cooling += dust::GasToDust(n_h, Ts, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
       }
@@ -407,7 +418,7 @@ struct GOW17Network {
     const Real *kph = cl.kph;
     Real c, d;
     if constexpr (K == IHE_PLUS) {
-      const Real a = kcr[ICR_HE];
+      const Real a = kcr[ICR_HE] + (cl.s.he_coll_ion ? k[I2_HE_E]*g.e : 0.0);
       c = a*(g.he + y[IHE_PLUS]);
       d = k[I2_HEP_H2]*y[IH2] + k[I2_HEP_CO]*y[ICO] + k[I2_HEP_E]*g.e +
           k[I2_HEP_H2_H2P]*y[IH2] + k[I2_HEP_OH]*y[IOHX] + kgr[IGR_HEP] + a;

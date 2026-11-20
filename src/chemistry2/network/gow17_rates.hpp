@@ -49,6 +49,7 @@ enum : int {
   I2_OP_H,        // O+ + *H -> H+ + *O
   I2_OP_H2_OH,    // O+ + H2 -> OH + *H
   I2_OP_H2,       // O+ + H2 -> *O + *H + *H
+  I2_HE_E,        // *He + *e -> He+ + 2 *e (Tigris; not in GOW17)
   N_2BODY
 };
 // Cosmic-ray reactions (s^-1, times xi_CR / 2e-16 s^-1 in units of the primary rate)
@@ -76,6 +77,17 @@ struct GOW17TemperatureRates {
   KOKKOS_INLINE_FUNCTION GOW17TemperatureRates(const Real T_rates, const Real T_coll_in,
                                                const bool kgr_h2_const);
 };
+
+//! He I + e -> He+ + 2e [cm^3 s^-1], Voronov (1997): dE = 24.6 eV, P = 0, A = 1.75e-8,
+//! X = 0.180, K = 0.35; zero for U > 80 (Tigris CollIonHeI)
+KOKKOS_INLINE_FUNCTION Real CollIonHeI(const Real T) {
+  const Real u = 24.6*11604.518/T;  // 24.6 eV/(k_B T)
+  if (u > 80.0) return 0.0;
+  return 1.75e-8/(0.180 + u)*Kokkos::pow(u, 0.35)*Kokkos::exp(-u);
+}
+
+//! He I ionization energy [erg], 24.587 eV
+constexpr Real CHI_HEI_ERG = 24.587*1.602176634e-12;
 
 KOKKOS_INLINE_FUNCTION Real CIIRecombination(const Real T) {
   constexpr Real A = 2.995e-9;
@@ -121,7 +133,7 @@ KOKKOS_INLINE_FUNCTION GOW17TemperatureRates::GOW17TemperatureRates(
       1.06e-5, 1.76e-9,  2.753e-14, 1.00,     1.00,          1.00,
       8.46e-7, 7.20e-15, 2.81e-11,  3.5e-11,  3.3e-13 * 0.3, 1.46e-10,
       1.99e-9, 1.00,     6.4e-10,   1.00,     1.00,          1.6e-9,
-      1.6e-9};
+      1.6e-9,  1.00};
   for (int i = 0; i < N_2BODY; ++i) k2[i] = base[i];
 
   const Real tp_m0190 = Kokkos::exp(-0.190*ln_T);
@@ -174,6 +186,7 @@ KOKKOS_INLINE_FUNCTION GOW17TemperatureRates::GOW17TemperatureRates(
   k2[I2_HP_O] *= (1.1e-11*Kokkos::exp(0.517*ln_T) + 4.0e-10*Kokkos::exp(6.69e-3*ln_T))*
                  Kokkos::exp(-227./T);
   k2[I2_OP_H] *= 4.99e-11*Kokkos::exp(0.405*ln_T) + 7.5e-10*Kokkos::exp(-0.458*ln_T);
+  k2[I2_HE_E] = CollIonHeI(T);
 
   // Collisional dissociation of H2 and ionization of H (Glover & Mac Low 2007)
   constexpr Real TEMP_COLL = 7.0e2;
