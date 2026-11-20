@@ -51,6 +51,14 @@ struct SemiImplicitSettings {
   }
 };
 
+//! Limits and tolerance of SolveToEquilibrium
+struct EquilibriumSettings {
+  Real dt_max;   // longest substep [code time]; the total time is not limited
+  int nsub_max;  // maximum number of substeps
+  Real tol;      // relative change per substep below which the state has converged
+  bool fixed_t;  // species only, at the temperature of the initial state
+};
+
 template <class Network>
 class SemiImplicit {
  public:
@@ -68,17 +76,89 @@ class SemiImplicit {
     Real t_now = t_start;
     int n = 0;
     for (; t_now < t_end; n++) {
-      // start of substep: clip negative abundances and energy, keep y^n
-      Real y_n[NSPEC];  // NOLINT(runtime/arrays)
-      for (int k = 0; k < NSPEC; k++) {
-        y_n[k] = Kokkos::fmax(y[k], 0.0);
-        y[k] = y_n[k];
-      }
-      e = Kokkos::fmax(e, 0.0);
+      const Real t_left = t_end - t_now;
+      const Real h = TakeSubstep(s, cell, t_left, n, y, e);
+      // land exactly on t_end on the last substep
+      t_now = (h == t_left) ? t_end : t_now + h;
+    }
+    return n;
+  }
 
-      // rates at the current state, then edot and its (non-positive) slope d(edot)/de
-      Substep sub = Network::Prepare(y, e, cell);
-      Real edot, dedot_de;
+  //! Substeps from (y, e) until every stored species and e change by less than q.tol
+  //! per substep (relative); with q.fixed_t, the species only, e reset after each
+  //! substep to keep the initial temperature. The energy test has the same form as the
+  //! species test, so it needs no heating/cooling split from the network.
+  //! Substeps much longer than the equilibration time can cycle between two states
+  //! around the equilibrium (energy and species updated in turn); a change that
+  //! reverses the previous one without halving it halves the longest substep allowed.
+  //! Returns the substep count, or -q.nsub_max if it did not converge.
+  KOKKOS_INLINE_FUNCTION static int SolveToEquilibrium(const SemiImplicitSettings &s,
+                                                       const Cell &cell,
+                                                       const EquilibriumSettings &q,
+                                                       Real *y, Real &e) {
+    Real T0 = 0.0;
+    if constexpr (HasEnergy<Network>::value) {
+      if (q.fixed_t) T0 = Network::Temperature(y, e, cell);
+    } else {
+      if (q.fixed_t) Kokkos::abort("chemistry2: fixed_t needs Network::Energy");
+    }
+    Real dt_cap = q.dt_max, f_prev = 0.0;
+    Real d_prev[NSPEC + 1] = {};  // NOLINT(runtime/arrays)
+    for (int n = 0; n < q.nsub_max; ++n) {
+      Real y_prev[NSPEC];  // NOLINT(runtime/arrays)
+      for (int k = 0; k < NSPEC; k++) y_prev[k] = y[k];
+      const Real e_prev = e;
+      // each substep may take dt_cap; the step limiter shortens it (index 0: Solve's
+      // rule that the last substep takes all the time left does not apply)
+      const Real h = TakeSubstep(s, cell, dt_cap, 0, y, e, q.fixed_t);
+      if constexpr (HasEnergy<Network>::value) {
+        if (q.fixed_t) e = Network::Energy(y, T0, cell);
+      }
+      // relative changes of the stored species and e; converged when the largest is
+      // below tol, a cycle when they point against the previous ones
+      Real d[NSPEC + 1];  // NOLINT(runtime/arrays)
+      for (int k = 0; k < NSPEC; k++) {
+        d[k] = (y[k] - y_prev[k])/Kokkos::fmax(y[k], s.yfloor);
+      }
+      d[NSPEC] = q.fixed_t ? 0.0 : (e - e_prev)/Kokkos::fmax(e, SMALL);
+      Real f = 0.0, dot = 0.0;
+      for (int k = 0; k <= NSPEC; k++) {
+        f = Kokkos::fmax(f, Kokkos::fabs(d[k]));
+        dot += d[k]*d_prev[k];
+        d_prev[k] = d[k];
+      }
+      if (f < q.tol) return n + 1;
+      // a cycle: reversed and not shrinking; otherwise the cap recovers toward dt_max
+      if (dot < 0.0 && f > 0.5*f_prev) {
+        dt_cap = 0.5*h;
+      } else if (dot > 0.0) {
+        dt_cap = Kokkos::fmin(2.0*dt_cap, q.dt_max);
+      }
+      f_prev = f;
+    }
+    return -q.nsub_max;
+  }
+
+ private:
+  //! One substep from (y, e), of at most t_left; n is the substep index, and the last
+  //! allowed one (n = nsub_max - 1) takes all of t_left. With species_only, e is not
+  //! updated and does not limit the step. Returns the length taken.
+  KOKKOS_INLINE_FUNCTION static Real TakeSubstep(const SemiImplicitSettings &s,
+                                                 const Cell &cell, const Real t_left,
+                                                 const int n, Real *y, Real &e,
+                                                 const bool species_only = false) {
+    // start of substep: clip negative abundances and energy, keep y^n
+    Real y_n[NSPEC];  // NOLINT(runtime/arrays)
+    for (int k = 0; k < NSPEC; k++) {
+      y_n[k] = Kokkos::fmax(y[k], 0.0);
+      y[k] = y_n[k];
+    }
+    e = Kokkos::fmax(e, 0.0);
+
+    // rates at the current state, then edot and its (non-positive) slope d(edot)/de
+    Substep sub = Network::Prepare(y, e, cell);
+    Real edot = 0.0, dedot_de = 0.0;
+    if (!species_only) {
       if constexpr (HasEdotDerivative<Network>::value) {
         edot = Network::EdotWithDerivative(y, e, cell, sub, &dedot_de);
         dedot_de = Kokkos::fmin(dedot_de, 0.0);
@@ -86,27 +166,25 @@ class SemiImplicit {
         edot = Network::Edot(y, e, cell, sub);
         dedot_de = EnergyDerivative(y, e, cell, sub, edot);
       }
-      // substep length: the limiting timescales, or all the time left at nsub_max
-      const Real t_left = t_end - t_now;
-      const Real h = (n >= s.nsub_max - 1)
-                         ? t_left
-                         : ChooseStep(s, y, e, cell, sub, edot, t_left,
-                                      typename Network::StepLimitingSpecies{});
+    }
+    // substep length: the limiting timescales, or all the time left at nsub_max
+    const Real h = (n >= s.nsub_max - 1)
+                       ? t_left
+                       : ChooseStep(s, y, e, cell, sub, edot, t_left,
+                                    typename Network::StepLimitingSpecies{});
 
-      // energy first (linearized backward Euler), then the species in order, then the
-      // species set by closure (e.g. electrons by charge conservation)
+    // energy first (linearized backward Euler), then the species in order, then the
+    // species set by closure (e.g. electrons by charge conservation)
+    if (!species_only) {
       e = Kokkos::fmax(e + h*edot/(1.0 - h*dedot_de), 0.0);
       if (s.refresh_rates) sub = Network::Prepare(y, e, cell);
-      UpdateInOrder(y, y_n, e, cell, sub, h, typename Network::UpdateOrder{});
-      Network::Closures(y, y_n, cell);
-
-      // land exactly on t_end on the last substep
-      t_now = (h == t_left) ? t_end : t_now + h;
     }
-    return n;
+    UpdateInOrder(y, y_n, e, cell, sub, h, typename Network::UpdateOrder{});
+    Network::Closures(y, y_n, cell);
+    return h;
   }
 
- private:
+
   static constexpr Real SMALL = 1e-35;
   static constexpr Real DE_REL = 1.0e-4;
 
@@ -198,6 +276,15 @@ class SemiImplicit {
   template <class N>
   struct HasEdotDerivative<N, std::void_t<decltype(N::EDOT_DERIVATIVE)>>
       : std::bool_constant<N::EDOT_DERIVATIVE> {};
+
+  //! A network with Energy(y, T, cell), the inverse of Temperature, supports fixed_t
+  template <class N, class = void>
+  struct HasEnergy : std::false_type {};
+  template <class N>
+  struct HasEnergy<N, std::void_t<decltype(N::Energy(std::declval<const Real *>(),
+                                                     Real(),
+                                                     std::declval<const Cell &>()))>>
+      : std::true_type {};
 };
 
 }  // namespace chemistry2

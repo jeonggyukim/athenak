@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <type_traits>
 
 #include "athena.hpp"
 #include "chemistry/chemistry.hpp"
@@ -100,6 +101,24 @@ std::string Chemistry2::SpeciesName(const int n) const {
 
 void Chemistry2::Advance(const Real dt) {
   Dispatch(active_, [&](auto pair) { Update<decltype(pair)>(0.0, dt); });
+}
+
+EquilibriumStats Chemistry2::Equilibrate(const EquilibriumSettings &q) {
+  EquilibriumStats st{0, 0};
+  Dispatch(active_, [&](auto pair) {
+    using P = decltype(pair);
+    using Net = typename P::Network;
+    if constexpr (std::is_same_v<typename P::Integrator, SemiImplicit<Net>>) {
+      st = EquilibrateCells<P>(q);
+    } else {
+      Fatal("Equilibrate needs ode_solver = semi_implicit");
+    }
+  });
+#if MPI_PARALLEL_ENABLED
+  MPI_Allreduce(MPI_IN_PLACE, &st.not_converged, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, &st.max_substeps, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+#endif
+  return st;
 }
 
 TaskStatus Chemistry2::UpdateTask(Driver *pdrive, int stage) {

@@ -120,6 +120,56 @@ void Chemistry2::Update(const Real t, const Real dt) {
   });
 }
 
+//! Solve every active cell to equilibrium with the semi-implicit pair Pair; returns the
+//! cells that did not converge and the largest substep count of those that did
+template <class Pair>
+EquilibriumStats Chemistry2::EquilibrateCells(const EquilibriumSettings &q) {
+  using Net = typename Pair::Network;
+  using Solver = typename Pair::Integrator;
+  constexpr int NSPEC = Net::NSPEC;
+
+  const auto w0 = is_mhd_ ? pmy_pack_->pmhd->w0 : pmy_pack_->phydro->w0;
+  const Real gamma = is_mhd_ ? pmy_pack_->pmhd->peos->eos_data.gamma
+                             : pmy_pack_->phydro->peos->eos_data.gamma;
+  const int first = first_scalar_;
+  const UnitFactors units = units_;
+  const SemiImplicitSettings solver = semi_implicit_;
+  const typename Net::Settings net = SettingsOf<Net>(networks_);
+  const InputSource inputs = inputs_;
+
+  // one flat index over (m, k, j, i) of the active cells, for the reduction
+  const auto &indcs = pmy_pack_->pmesh->mb_indcs;
+  const int is = indcs.is, js = indcs.js, ks = indcs.ks;
+  const int nx1 = indcs.nx1, nx2 = indcs.nx2, nx3 = indcs.nx3;
+  const int nji = nx2*nx1, nkji = nx3*nji;
+  const int nmkji = pmy_pack_->nmb_thispack*nkji;
+  int not_converged = 0, max_substeps = 0;
+  Kokkos::parallel_reduce("chemistry2_equilibrate",
+                          Kokkos::RangePolicy<>(DevExeSpace(), 0, nmkji),
+                          KOKKOS_LAMBDA(const int idx, int &nc, int &ns) {
+    const int m = idx/nkji;
+    const int k = (idx - m*nkji)/nji;
+    const int j = (idx - m*nkji - k*nji)/nx1;
+    const int i = idx - m*nkji - k*nji - j*nx1 + is;
+    Real y[NSPEC];  // NOLINT(runtime/arrays)
+    LoadSpecies<NSPEC>(w0, m, first, k + ks, j + js, i, y);
+    Real e = w0(m, IEN, k + ks, j + js, i);
+    // grad_v stays 0: no LVG escape term in an equilibrium
+    const CellInputs in = inputs.Load(m, k + ks, j + js, i);
+    const typename Net::Cell cell = Net::MakeCell(w0(m, IDN, k + ks, j + js, i), gamma,
+                                                  net, units, in);
+    const int n = Solver::SolveToEquilibrium(solver, cell, q, y, e);
+    if (n < 0) {
+      nc += 1;
+    } else if (n > ns) {
+      ns = n;
+    }
+    StoreSpecies<NSPEC>(w0, m, first, k + ks, j + js, i, y);
+    w0(m, IEN, k + ks, j + js, i) = e;
+  }, Kokkos::Sum<int>(not_converged), Kokkos::Max<int>(max_substeps));
+  return EquilibriumStats{not_converged, max_substeps};
+}
+
 }  // namespace chemistry2
 
 #endif  // CHEMISTRY2_UPDATE_UPDATE_HPP_

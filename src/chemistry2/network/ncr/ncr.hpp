@@ -249,6 +249,11 @@ struct NCRNetwork {
            Thermo::CvCold(y[IH2], c.s.x_he, y[IE], c.gamma);
   }
 
+  //! e (code units) at temperature T [K], the inverse of Temperature
+  KOKKOS_INLINE_FUNCTION static Real Energy(const Real *y, const Real T, const Cell &c) {
+    return T*Thermo::CvCold(y[IH2], c.s.x_he, y[IE], c.gamma)*c.n_h*c.inv_u_energy;
+  }
+
   //! x_C+ in equilibrium (Tigris GetxCII), with the stored (lagged) x_e
   KOKKOS_INLINE_FUNCTION static Real XCII(const Real x_e, const Real x_h2, const Real T,
                                           const Real lnT, const Cell &c,
