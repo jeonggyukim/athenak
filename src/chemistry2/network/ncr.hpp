@@ -30,6 +30,7 @@
 #include "chemistry2/network/network_config.hpp"
 #include "chemistry2/network/species_table.hpp"
 #include "chemistry2/thermo/dust.hpp"
+#include "chemistry2/thermo/hot_gas.hpp"
 #include "chemistry2/thermo/ncr_terms.hpp"
 #include "chemistry2/thermo/thermo.hpp"
 #include "chemistry2/unit_factors.hpp"
@@ -67,11 +68,19 @@ struct NCRNetwork {
     RowTable table;              // NCR rate table (TABLE only)
     bool case_a = false;         // H+ recombination: case A instead of B (as Cloudy CIE)
     bool nebular = true;         // nebular line fit; off when ion ladders cool by line
+    Real temp_hot0 = ncr::TEMP_HOT0;  // hot-gas window [temp_hot0, temp_hot1] [K]
+    hot::CIETable cie;           // CIE helium and metal cooling and electrons
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
     Settings s = ReadValues(pin, b);
+    s.temp_hot0 = pin->GetOrAddReal(b, "NCR_temp_hot0", ncr::TEMP_HOT0);
     if constexpr (TABLE) s.table = ncr::BuildNCRTable();
+    // the CIE table is read only when an NCR chemical network is the one selected
+    if (pin->GetOrAddString(b, "network", "").rfind("NCR", 0) == 0) {
+      s.cie = hot::ReadCIETable(pin->GetOrAddString(
+          b, "cie_table", "inputs/chemistry2/cie/tigress_coolftn_ncr.txt"));
+    }
     return s;
   }
 
@@ -248,15 +257,13 @@ struct NCRNetwork {
     // H+
     sub.k_coll_hi = tc.k_coll;
     Real a_gr = 0.0;
-    if (T < ncr::TEMP_HOT1) {
+    if (T < c.s.temp_hot1) {
       constexpr Real CHP[7] = {12.25, 8.074e-6, 1.378, 5.087e2, 1.586e-2, 0.4723,
                                1.102e-5};
       const Real psi = 1.7*c.chi*Kokkos::sqrt(T)/(n_e + 1e-50) + 1e-50;
       a_gr = ncr::GrainRec(CHP, T, lnT, psi)*c.s.zd;
-      if (T > ncr::TEMP_HOT0) {
-        a_gr *= 1.0 - 1.0/(1.0 + Kokkos::exp(-10.0*(T - 0.5*(ncr::TEMP_HOT0 +
-                                                              ncr::TEMP_HOT1))/
-                                             (ncr::TEMP_HOT1 - ncr::TEMP_HOT0)));
+      if (T > c.s.temp_hot0) {
+        a_gr *= 1.0 - hot::Weight<Real>(T, c.s.temp_hot0, c.s.temp_hot1);
       }
     }
     const Real xi_h = c.xi_cr*(2.3*y[IH2] + 1.5*sub.x_hi);
@@ -285,14 +292,26 @@ struct NCRNetwork {
     return sub;
   }
 
-  //! Free electrons from H+, C+, O+ and molecular ions (Tigris CalculateFreeElectron,
-  //! below TEMP_HOT0; the hot branch with CIE comes with P4)
+  //! Free electrons from H+, C+, O+ and molecular ions (Tigris CalculateFreeElectron);
+  //! above temp_hot0 the metal and molecular part hands over to the CIE helium and
+  //! metal electrons with the hot-gas weight
   KOKKOS_INLINE_FUNCTION static Real FreeElectrons(const Real x_e_old, const Real x_h2,
                                                    const Real x_hii, const Real T,
                                                    const Cell &c, const TCoef &tc) {
     const Real lnT = Kokkos::log(T);
     const Real x_cii = XCII(x_e_old, x_h2, T, lnT, c, tc);
-    return x_hii + x_cii + x_hii*ncr::X_O_STD*c.s.zg + XeMol(x_e_old, x_h2, c, tc);
+    if (T <= c.s.temp_hot0) {
+      return x_hii + x_cii + x_hii*ncr::X_O_STD*c.s.zg + XeMol(x_e_old, x_h2, c, tc);
+    }
+    const Real w = hot::Weight<Real>(T, c.s.temp_hot0, c.s.temp_hot1);
+    const Real cold = x_cii + x_hii*ncr::X_O_STD*c.s.zg + XeMol(x_e_old, x_h2, c, tc);
+    Real cie = 0.0;
+    if (c.s.cie.n > 0) {
+      Real v[hot::CIETable::NCOL];
+      c.s.cie.Eval(T, v);
+      cie = v[hot::CIETable::XE_HE] + c.s.zg*v[hot::CIETable::XE_METAL];
+    }
+    return x_hii + (1.0 - w)*cold + w*cie;
   }
 
   //! Creation c [per H per code time] and destruction d [per code time]
@@ -383,31 +402,51 @@ struct NCRNetwork {
     heating += Thermo::HeatingH2gr(x_hi, x_h2, n_h, T, sub.kgr*n_h, k_ph_h2);
     heating += Thermo::HeatingH2pump(x_hi, x_h2, n_h, T, k_ph_h2);
     heating += Thermo::HeatingH2diss(k_ph_h2, x_h2);
-    Real cooling = Thermo::CoolingCII(sub.x_cii, n_hi, n_h2, n_e, T);
-    cooling += Thermo::CoolingCI(sub.x_ci, n_hi, n_h2, n_e, T);
-    cooling += Thermo::CoolingOI(sub.x_oi, n_hi, n_h2, n_e, T);
-    if (T > 3.0e3) cooling += Thermo::CoolingLya(x_hi, n_e, T);
+    // non-hydrogen cold-gas cooling (fine-structure, CO, nebular, grain recombination,
+    // gas-dust), handed to CIE above temp_hot0
+    Real other = Thermo::CoolingCII(sub.x_cii, n_hi, n_h2, n_e, T);
+    other += Thermo::CoolingCI(sub.x_ci, n_hi, n_h2, n_e, T);
+    other += Thermo::CoolingOI(sub.x_oi, n_hi, n_h2, n_e, T);
     if (sub.x_co > 0.0) {
       const Real vth = Kokkos::sqrt(2.*units::Units::k_boltzmann_cgs*T/
                                     units::Units::CO_mass_cgs);
       const Real grad_eff = Kokkos::fmax(c.grad_v, vth/c.s.leff_co_max);
-      cooling += Thermo::CoolingCOR(sub.x_co, n_hi, n_h2, n_e, T,
-                                    n_h*sub.x_co/grad_eff);
+      other += Thermo::CoolingCOR(sub.x_co, n_hi, n_h2, n_e, T, n_h*sub.x_co/grad_eff);
     }
+    if (c.s.nebular && T < c.s.temp_hot1) {
+      other += ncr_terms::CoolingNebular(x_e, y[IH_PLUS], n_h, T, c.s.zg);
+    }
+    other += Thermo::CoolingRec(c.s.zd, T, n_e, c.chi);
+    if (c.s.dust_cooling) {
+      other += dust::GasToDust(n_h, T, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
+    }
+    Real cooling = 0.0;
+    if (T > 3.0e3) cooling += Thermo::CoolingLya(x_hi, n_e, T);
     if (c.s.h2_rovib_cooling && T < c.s.temp_hot1) {
       cooling += ncr_terms::CoolingH2Moseley(x_h2, x_hi, n_h, T);
     }
     cooling += ncr_terms::CoolingHII(x_e, y[IH_PLUS], n_h, T, ncr::AlphaBHII(T));
-    if (c.s.nebular && T < c.s.temp_hot1) {
-      cooling += ncr_terms::CoolingNebular(x_e, y[IH_PLUS], n_h, T, c.s.zg);
-    }
-    cooling += Thermo::CoolingRec(c.s.zd, T, n_e, c.chi);
     cooling += Thermo::CoolingH2diss(x_hi, x_h2, sub.k_h2_h*n_h, sub.k_h2_h2*n_h);
     cooling += Thermo::CoolingHIion(x_hi, x_e, sub.k_coll_hi*n_h);
-    if (c.s.dust_cooling) {
-      cooling += dust::GasToDust(n_h, T, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
+    HotBlend<Real>(T, n_h, c, &heating, &other);
+    return HeatCool{heating, cooling + other};
+  }
+
+  //! Above temp_hot0: heating and the non-hydrogen cold-gas cooling times 1 - w, plus
+  //! w times the CIE helium and metal cooling [erg s^-1 per H]
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static void HotBlend(const S &T, const Real n_h, const Cell &c,
+                                              S *heating, S *other) {
+    if (dual::Value(T) <= c.s.temp_hot0) return;
+    const S w = hot::Weight<S>(T, c.s.temp_hot0, c.s.temp_hot1);
+    *heating *= 1.0 - w;
+    S cie = 0.0;
+    if (c.s.cie.n > 0) {
+      S v[hot::CIETable::NCOL];
+      c.s.cie.Eval(T, v);
+      cie = n_h*(v[hot::CIETable::LAMBDA_HE] + c.s.zg*v[hot::CIETable::LAMBDA_METAL]);
     }
-    return HeatCool{heating, cooling};
+    *other = (1.0 - w)*(*other) + w*cie;
   }
 
   static constexpr bool EDOT_DERIVATIVE = TABLE;  // EdotWithDerivative, dual numbers
@@ -478,21 +517,32 @@ struct NCRNetwork {
     heating += Thermo::HeatingH2diss(k_ph_h2, x_h2);
     // cooling: fine-structure lines from GOW17's columns
     const gow17::GOW17ThermoCoefficients<S> k = gow17::LookupThermo<S>(tab, s_t, dw);
-    S cooling = Thermo::CoolingCIIFrom(sub.x_cii, n_hi, n_h2, n_e, k.cii, k.cii_boltz);
-    cooling += Thermo::CoolingCIFrom(sub.x_ci, n_hi, n_h2, n_e, k.ci, k.ci_boltz[0],
-                                     k.ci_boltz[1], k.ci_boltz[2]);
-    cooling += Thermo::CoolingOIFrom(sub.x_oi, n_hi, n_h2, n_e, k.oi, k.oi_boltz[0],
-                                     k.oi_boltz[1], k.oi_boltz[2]);
-    if (T > 3.0e3) {
-      cooling += Thermo::CoolingLyaFrom(x_hi, n_e, col(gow17::C_LYA),
-                                        col(gow17::C_LYA + 1));
-    }
+    // non-hydrogen cold-gas cooling, handed to CIE above temp_hot0 (HotBlend)
+    S other = Thermo::CoolingCIIFrom(sub.x_cii, n_hi, n_h2, n_e, k.cii, k.cii_boltz);
+    other += Thermo::CoolingCIFrom(sub.x_ci, n_hi, n_h2, n_e, k.ci, k.ci_boltz[0],
+                                   k.ci_boltz[1], k.ci_boltz[2]);
+    other += Thermo::CoolingOIFrom(sub.x_oi, n_hi, n_h2, n_e, k.oi, k.oi_boltz[0],
+                                   k.oi_boltz[1], k.oi_boltz[2]);
     if (sub.x_co > 0.0) {
       const S vth = dual::sqrt((2.*units::Units::k_boltzmann_cgs/
                                 units::Units::CO_mass_cgs)*Ts);
       const S grad_eff = dual::fmax(vth*(1.0/c.s.leff_co_max), c.grad_v);
       const S n_co_eff = (n_h*sub.x_co)/grad_eff;
-      cooling += Thermo::CoolingCOR(sub.x_co, n_hi, n_h2, n_e, Ts, n_co_eff);
+      other += Thermo::CoolingCOR(sub.x_co, n_hi, n_h2, n_e, Ts, n_co_eff);
+    }
+    if (c.s.nebular && T < c.s.temp_hot1) {  // nebular lines
+      const S l = dual::log(Ts*1e-4);
+      const S f_red = 1.0/(1.0 + 0.12*dual::pow(x_e*n_h*1e-2, 0.38 - 0.12*l));
+      other += col(ncr::C_NEB)*f_red*(3.677602203699553e-21*c.s.zg*x_hii*x_e*n_h);
+    }
+    other += Thermo::CoolingRec(c.s.zd, Ts, n_e, c.chi);
+    if (c.s.dust_cooling) {
+      other += dust::GasToDust(n_h, Ts, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
+    }
+    S cooling = 0.0;
+    if (T > 3.0e3) {
+      cooling += Thermo::CoolingLyaFrom(x_hi, n_e, col(gow17::C_LYA),
+                                        col(gow17::C_LYA + 1));
     }
     if (c.s.h2_rovib_cooling && T < c.s.temp_hot1) {  // Moseley et al. (2021)
       const Real x1 = n_hi + 5.0*n_h2, x2 = n_hi + 4.5*n_h2;
@@ -506,12 +556,6 @@ struct NCRNetwork {
                   col(ncr::C_MOS + 3)*d4)*x_h2;
     }
     cooling += (col(ncr::C_HII_FF) + col(ncr::C_HII_REC))*(n_h*x_e*x_hii);
-    if (c.s.nebular && T < c.s.temp_hot1) {  // nebular lines
-      const S l = dual::log(Ts*1e-4);
-      const S f_red = 1.0/(1.0 + 0.12*dual::pow(x_e*n_h*1e-2, 0.38 - 0.12*l));
-      cooling += col(ncr::C_NEB)*f_red*(3.677602203699553e-21*c.s.zg*x_hii*x_e*n_h);
-    }
-    cooling += Thermo::CoolingRec(c.s.zd, Ts, n_e, c.chi);
     // collisional H2 dissociation and H ionization: values from Prepare, derivative
     // of their temperature dependence from the table
     S k_h2_h = sub.k_h2_h*n_h, k_h2_h2 = sub.k_h2_h2*n_h, k_hi = sub.k_coll_hi*n_h;
@@ -530,10 +574,8 @@ struct NCRNetwork {
     }
     cooling += Thermo::CoolingH2diss(x_hi, x_h2, k_h2_h, k_h2_h2);
     cooling += Thermo::CoolingHIion(x_hi, x_e, k_hi);
-    if (c.s.dust_cooling) {
-      cooling += dust::GasToDust(n_h, Ts, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
-    }
-    return HeatCoolT<S>{heating, cooling};
+    HotBlend<S>(Ts, n_h, c, &heating, &other);
+    return HeatCoolT<S>{heating, cooling + other};
   }
 
   KOKKOS_INLINE_FUNCTION static void Closures(Real *, const Real *, const Cell &) {}
