@@ -3,8 +3,8 @@ Radiative supernova remnant with the NCR chemical network: 1e51 erg and 10 Msun 
 uniform medium of n_H = 1 cm^-3, 64^3 cells over 64 pc, run to t = 0.05 (pc/(km/s)).
 Shell formation is the maximum of the hot-gas mass M_hot (T > 2e4 K); its time t_sf, the
 hot mass M_sf and the radial momentum p_sf are compared with this code's own reference
-run (inputs/chemistry2/radiative_snr_ncr.athinput, Mac CPU, g++-16; identical on 1 and 4
-MPI ranks).
+run (inputs/chemistry2/radiative_snr_ncr.athinput, Mac CPU, g++-16; the same to 6 digits
+on 1, 4 and 8 MPI ranks). The test runs on 8 ranks, one 32^3 MeshBlock each.
 
 The same run against Tigris NCR (tst/regression feedback/rad_snr, 4 ranks): t_sf -0.01%,
 M_sf +1.4%, p_sf +0.1%.
@@ -32,9 +32,10 @@ def read_hst(path):
     return {n: data[:, i] for i, n in enumerate(names)}
 
 
-def test_radiative_snr_cpu():
+def test_radiative_snr_mpicpu():
     try:
-        assert testutils.run(input_file, ["time/tlim=0.05", "output2/dt=1.0"])
+        assert testutils.mpi_run(input_file, ["time/tlim=0.05", "output2/dt=1.0"],
+                                 threads=8)
         h = read_hst("snr.user.hst")
         i = int(np.argmax(h["M_hot"]))
         result = {"t_sf": h["time"][i], "M_sf": h["M_hot"][i]*U_M,
