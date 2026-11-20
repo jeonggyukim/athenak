@@ -77,6 +77,7 @@ class ProblemGenerator {
   void H2Uniform(ParameterInput* pin, const bool restart);
   void GOW17Uniform(ParameterInput* pin, const bool restart);
   void GOW17Turb(ParameterInput* pin, const bool restart);
+  void RadiativeSNR(ParameterInput* pin, const bool restart);
   void GOW17ReadVTK(ParameterInput* pin, const bool restart);
   void SelfGravity(ParameterInput *pin, const bool restart);
   void BinaryGravity(ParameterInput *pin, const bool restart);

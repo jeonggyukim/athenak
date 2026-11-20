@@ -1,0 +1,85 @@
+<comment>
+problem   = one supernova in a uniform medium, NCR chemical network (chemistry2)
+reference = Tigris inputs/feedback/athinput.radiative_snr; Kim & Ostriker (2015)
+
+<job>
+basename  = snr
+
+<mesh>
+nghost    = 3          # FOFC with plm needs 3
+nx1       = 64
+x1min     = -32.0
+x1max     = 32.0
+ix1_bc    = periodic
+ox1_bc    = periodic
+nx2       = 64
+x2min     = -32.0
+x2max     = 32.0
+ix2_bc    = periodic
+ox2_bc    = periodic
+nx3       = 64
+x3min     = -32.0
+x3max     = 32.0
+ix3_bc    = periodic
+ox3_bc    = periodic
+
+<meshblock>
+nx1       = 32
+nx2       = 32
+nx3       = 32
+
+<time>
+evolution  = dynamic
+integrator = rk2
+cfl_number = 0.3
+nlim       = -1
+tlim       = 0.1        # pc/(km/s) = 0.978 Myr, as Tigris
+ndiag      = 10
+
+<hydro>
+eos             = ideal
+reconstruct     = plm
+rsolver         = hllc
+gamma           = 1.666666666666667
+nscalars        = 0
+fofc            = true
+
+<units>
+length_cgs  = 3.0856775809623245e+18  # 1 pc
+mass_cgs    = 6.882615081124725e+31   # density unit: mu_H m_H n_H with n_H = 1 cm^-3
+time_cgs    = 3.08567758e+13          # 1 pc/(km/s)
+mu          = 1.27
+
+<chemistry2>
+network          = NCR
+ode_solver       = semi_implicit
+radiation_G0     = 1.0        # chi0, as Tigris
+radiation_CR     = 2e-16      # xi_cr0, as Tigris
+NCR_Z_d          = 1.0
+NCR_Z_g          = 1.0
+NCR_cool_hyd_cie = true       # CIE hydrogen cooling above temp_hot0, as Tigris run_series.sh
+
+<problem>
+pgen_name       = radiative_snr
+user_hist       = true
+nH_0            = 1.0       # cm^-3
+pgas_0          = 3000.0    # k_B K cm^-3
+n_equilibrate   = 2000      # chemistry-only steps for the ambient gas (Tigris 2000)
+dt_equilibrate  = 0.1       # per step (Tigris 1e5 yr)
+M_ej            = 10.0      # Msun
+E_SN            = 1.0       # 1e51 erg
+N_sc            = 3         # subcells per cell per dimension
+rfb_res         = 3.0       # feedback radius in cells
+diag_chem_steps = 0         # > 0: chemistry-only diagnostic after injection, then exit
+diag_chem_dt    = 1.0e-4
+diag_after_cycles = 0       # cycle of the diagnostic; 0: right after the injection
+
+<output1>
+file_type   = hst
+dt          = 1.0e-5
+data_format = %.17e     # full precision: the cooling rate is a difference of tot-E
+
+<output2>
+file_type  = bin
+variable   = hydro_w
+dt         = 1.0e-2
