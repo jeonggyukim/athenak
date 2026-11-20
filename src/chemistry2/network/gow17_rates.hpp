@@ -277,9 +277,11 @@ KOKKOS_INLINE_FUNCTION GOW17Rates MakeGOW17Rates(const GOW17TemperatureRates &t,
   r.k2[I2_OP_H2_OH] *= fac_h2;
   r.k2[I2_OP_H2] *= fac_e;
 
-  // Collisional dissociation: density blend of the low- and high-density limits
+  // Collisional dissociation: density blend of the low- and high-density limits. Glover
+  // & Mac Low (2007) eq. 27 counts H2 by H nuclei (their x_H2 = 2 n_H2/n), so with
+  // x_h2 = n_H2/n_H the H2 term carries a factor 2
   if (t.coll_active && n_h > SMALL_REAL) {
-    const Real div_ncr = x_h/(t.ncr_h + SMALL_REAL) + x_h2/(t.ncr_h2 + SMALL_REAL);
+    const Real div_ncr = x_h/(t.ncr_h + SMALL_REAL) + 2.0*x_h2/(t.ncr_h2 + SMALL_REAL);
     const Real ncr = (div_ncr < SMALL_REAL) ? 1./SMALL_REAL : 1./div_ncr;
     const Real n2ncr = n_h/ncr;
     r.k2[I2_H2_H] = Kokkos::exp(LN10*(t.log10_k9h*n2ncr/(1. + n2ncr) +

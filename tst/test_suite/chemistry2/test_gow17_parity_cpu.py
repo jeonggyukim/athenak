@@ -27,7 +27,11 @@ def write_input(block, out_file):
     text = re.sub(r"(ode_solver\s*=\s*)\S+",
                   r"\1semi_implicit\nsemi_implicit_nsub_max = 1", text, count=1)
     if block == "chemistry2":  # the analytic fits; plain GOW17 reads the rate table
-        text = re.sub(r"(network\s*=\s*)GOW17", r"\1GOW17_analytic", text, count=1)
+        # and without the chemistry2 additions not in src/chemistry: He I collisional
+        # ionization, hot gas
+        text = re.sub(r"(network\s*=\s*)GOW17",
+                      r"\1GOW17_analytic\nGOW17_he_coll_ion = false\n"
+                      r"GOW17_hot_cooling = false", text, count=1)
     with open(out_file, "w") as f:
         f.write(text.replace("<chemistry>", "<" + block + ">"))
 

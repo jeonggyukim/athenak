@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "athena.hpp"
+#include "chemistry2/data_path.hpp"
 #include "chemistry2/ions/ion_cooling.hpp"
 #include "chemistry2/ions/ion_ladder.hpp"
 #include "chemistry2/ions/ion_table.hpp"
@@ -72,7 +73,7 @@ struct NCROxygen {
     // the ion data are read only when this chemical network is the one selected
     if (pin->GetOrAddString(b, "network", "") != std::string(NAME)) return s;
     const std::string dir = pin->GetOrAddString(b, "ion_data_dir",
-                                                "inputs/chemistry2/ions/");
+                                                DataPath("inputs/chemistry2/ions/"));
     s.ions = ions::BuildIonTable(ions::IonRateData(dir), s.base.table.grid, 8, Q);
     std::vector<std::string> names = {"o_2", "o_3"};
     names.resize(N_COOL);

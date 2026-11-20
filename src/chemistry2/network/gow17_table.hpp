@@ -14,6 +14,7 @@
 #include "chemistry2/ions/rates/coll_ion_rate.hpp"
 #include "chemistry2/network/gow17_rates.hpp"
 #include "chemistry2/rates/row_table.hpp"
+#include "chemistry2/thermo/hot_gas.hpp"
 #include "chemistry2/thermo/thermo.hpp"
 
 namespace chemistry2 {
@@ -34,7 +35,10 @@ enum : int {
   C_H2GEFF = C_OI_BOLTZ + 3,             // geff_H, geff_H2
   C_H2COOL = C_H2GEFF + 2,               // LHI, LH2, LHe, LHplus, Le, LTE
   C_LYA = C_H2COOL + 6,                  // fac, k01
-  N_COLS = C_LYA + 2
+  C_CIE = C_LYA + 2,                     // hot::NCOL CIE columns (Lambda_He,
+                                         // Lambda_metal, xe_He, xe_metal); zero
+                                         // without a CIE table
+  N_COLS = C_CIE + hot::NCOL
 };
 
 // Every column holds the value and is interpolated linearly. At 64 rows per octave the
@@ -97,18 +101,28 @@ inline void FillRow(const Real T, const bool kgr_h2_const, Real *row) {
   const Real fac = 5.31e-8*Kokkos::pow(T4, 0.15)/(1. + Kokkos::pow(T4/5., 0.65));
   v[C_LYA] = fac;
   v[C_LYA + 1] = fac*Kokkos::exp(-11.84/T4);
+  for (int k = 0; k < hot::NCOL; ++k) v[C_CIE + k] = 0.0;  // FillCIE
   for (int c = 0; c < N_COLS; ++c) row[c] = v[c];
 }
 
+//! The CIE columns of one row at T from cie (left at zero without it)
+inline void FillCIE(const Real T, const hot::CIESource *cie, Real *row) {
+  if (cie == nullptr) return;
+  for (int k = 0; k < hot::NCOL; ++k) row[C_CIE + k] = cie->Eval(k, T);
+}
+
 //! The GOW17 table, rows_per_octave rows per factor of 2 in T from 1 K to 2^30 K; the
-//! He I collisional ionization column from ci_he (Voronov 1997), zero without it
+//! He I collisional ionization column from ci_he (Voronov 1997) and the CIE columns
+//! from cie, each zero without its source
 inline RowTable BuildGOW17Table(const bool kgr_h2_const,
                                 const int rows_per_octave = ROWS_PER_OCTAVE,
-                                const Rates::CollIonFit *ci_he = nullptr) {
+                                const Rates::CollIonFit *ci_he = nullptr,
+                                const hot::CIESource *cie = nullptr) {
   const RowGrid grid = RowGrid::Make(1.0, 1073741824.0, 30*rows_per_octave + 1);
   return BuildRowTable(grid, N_COLS, [&](Real T, Real *row) {
     FillRow(T, kgr_h2_const, row);
     row[C_K2 + I2_HE_E] = ci_he ? ci_he->Rate(T) : 0.0;
+    FillCIE(T, cie, row);
   });
 }
 

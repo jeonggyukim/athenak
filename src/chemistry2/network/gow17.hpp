@@ -21,6 +21,7 @@
 
 #include "athena.hpp"
 #include "parameter_input.hpp"
+#include "chemistry2/data_path.hpp"
 #include "chemistry2/inputs/cell_inputs.hpp"
 #include "chemistry2/ions/rates/coll_ion_rate.hpp"
 #include "chemistry2/ions/rates/ion_threshold.hpp"
@@ -86,16 +87,25 @@ struct GOW17Network {
     bool he_coll_ion = true;
     Rates::CollIonFit ci_he;   // He I + e (Voronov 1997, inputs/chemistry2/ions)
     Real chi_he_erg = 0.0;     // He I ionization energy (Verner et al. 1996) [erg]
+    // hot gas: CIE helium and metal terms with the hot-gas weight on [temp_hot0,
+    // temp_hot1] (thermo/hot_gas.hpp); off for parity with src/chemistry
+    bool hot = false;
+    Real temp_hot0 = 2.0e4, temp_hot1 = 3.5e4, zg = 1.0;
+    hot::CIETable cie;         // analytic path only; the table path reads gow17::C_CIE
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
     Settings s = ReadValues(pin, b);
     s.he_coll_ion = pin->GetOrAddBoolean(b, "GOW17_he_coll_ion", true);
-    // the atomic data are read only when a GOW17 chemical network is the one selected
-    if (s.he_coll_ion &&
-        pin->GetOrAddString(b, "network", "").rfind("GOW17", 0) == 0) {
+    s.hot = pin->GetOrAddBoolean(b, "GOW17_hot_cooling", true);
+    s.temp_hot0 = pin->GetOrAddReal(b, "GOW17_temp_hot0", 2.0e4);
+    s.temp_hot1 = pin->GetOrAddReal(b, "GOW17_temp_hot1", 3.5e4);
+    s.zg = pin->GetOrAddReal(b, "GOW17_Z_g", 1.0);
+    // the data files are read only when a GOW17 chemical network is the one selected
+    const bool selected = pin->GetOrAddString(b, "network", "").rfind("GOW17", 0) == 0;
+    if (s.he_coll_ion && selected) {
       const std::string dir = pin->GetOrAddString(b, "ion_data_dir",
-                                                  "inputs/chemistry2/ions/");
+                                                  DataPath("inputs/chemistry2/ions/"));
       Rates::CollIonRate ci;
       ci.Load(dir + "voronov97_coll_ion.dat");
       ions::IonThreshold th;
@@ -103,8 +113,17 @@ struct GOW17Network {
       s.ci_he = ci.Get(2, 2);
       s.chi_he_erg = th.Erg(2, 2);
     }
+    hot::CIESource src;
+    s.hot = s.hot && selected;
+    if (s.hot) {
+      src = hot::ReadCIESource(pin->GetOrAddString(
+          b, "cie_table", DataPath("inputs/chemistry2/cie/tigress_coolftn_ncr.txt")));
+    }
     if constexpr (TABLE) {
-      s.table = gow17::BuildGOW17Table(s.kgr_h2_const, gow17::ROWS_PER_OCTAVE, &s.ci_he);
+      s.table = gow17::BuildGOW17Table(s.kgr_h2_const, gow17::ROWS_PER_OCTAVE, &s.ci_he,
+                                       s.hot ? &src : nullptr);
+    } else {
+      if (s.hot) s.cie = hot::MakeCIETable(src);
     }
     return s;
   }
@@ -191,10 +210,45 @@ struct GOW17Network {
     return e*c.u_energy*c.inv_n_h/Thermo::CvCold(y[IH2], c.s.x_he, x_e, c.gamma);
   }
 
+  //! The hot::NCOL CIE values at T [K] (zero without a CIE table)
+  KOKKOS_INLINE_FUNCTION static void CIEAt(const Cell &c, const Real T, Real *v) {
+    for (int k = 0; k < hot::NCOL; ++k) v[k] = 0.0;
+    if (!c.s.hot) return;
+    if constexpr (TABLE) {
+      const Slot s = c.s.table.grid.Locate(T);
+      for (int k = 0; k < hot::NCOL; ++k) v[k] = c.s.table.At(s, gow17::C_CIE + k);
+    } else {
+      if (c.s.cie.n > 0) c.s.cie.Eval(T, v);
+    }
+  }
+
+  //! Above temp_hot0 the electrons gain w times the CIE helium and metal electrons
+  //! beyond those of the tracked ions (Tigris); T and x_e found together by three
+  //! fixed-point passes
+  KOKKOS_INLINE_FUNCTION static void HotElectrons(const Real *y, const Real e,
+                                                  const Cell &c, Ghosts *g) {
+    const Real x_e0 = g->e;
+    const Real x_he_ions = y[IHE_PLUS];
+    const Real x_metal_ions = x_e0 - y[IH_PLUS] - y[IH2_PLUS] - y[IH3_PLUS] - x_he_ions;
+    for (int it = 0; it < 3; ++it) {
+      const Real T = RawTemperature(y, e, g->e, c);
+      if (T <= c.s.temp_hot0) {
+        g->e = x_e0;
+        return;
+      }
+      Real v[hot::NCOL];
+      CIEAt(c, T, v);
+      const Real extra = Kokkos::fmax(0.0, v[hot::XE_HE] - x_he_ions) +
+                         Kokkos::fmax(0.0, c.s.zg*v[hot::XE_METAL] - x_metal_ions);
+      g->e = x_e0 + hot::Weight<Real>(T, c.s.temp_hot0, c.s.temp_hot1)*extra;
+    }
+  }
+
   KOKKOS_INLINE_FUNCTION static Substep Prepare(const Real *y, const Real e,
                                                 const Cell &c) {
     Substep sub;
     sub.g = MakeGhosts(y, c.s);
+    if (c.s.hot) HotElectrons(y, e, c, &sub.g);
     Real T = RawTemperature(y, e, sub.g.e, c);
     Real T_coll = T;
     if (T < c.s.t_min_rates) {
@@ -215,6 +269,11 @@ struct GOW17Network {
       sub.r = gow17::MakeGOW17Rates(tr, y[IH2], sub.g.h, sub.g.e, c.n_h, c.s.zd,
                                     c.xi_cr, c.g0);
       sub.r.k2[gow17::I2_HE_E] = c.s.ci_he.Rate(T)*c.n_h;
+    }
+    // grain-assisted recombination of H+, He+, C+, Si+ fades out in hot gas (Tigris)
+    if (c.s.hot && T > c.s.temp_hot0) {
+      const Real w1 = 1.0 - hot::Weight<Real>(T, c.s.temp_hot0, c.s.temp_hot1);
+      for (int s = 0; s < 4; ++s) sub.r.kgr[gow17::IGR_HP + s] *= w1;
     }
     return sub;
   }
@@ -257,14 +316,16 @@ struct GOW17Network {
       heating += Thermo::HeatingH2diss(k_h2_photo, y[IH2]);
     }
     // cooling
-    Real cooling = 0.0;
+    Real cooling = 0.0, cooling_h = 0.0;
     if (T >= c.s.t_min_cooling) {
       const Real T_cap = Kokkos::fmin(T, c.s.t_max_cooling_nm);
       const Real n_hi = n_h*g.h, n_h2 = n_h*y[IH2], n_e = n_h*g.e;
       cooling = Thermo::CoolingCII(y[IC_PLUS], n_hi, n_h2, n_e, T_cap);
       cooling += Thermo::CoolingCI(g.c, n_hi, n_h2, n_e, T_cap);
       cooling += Thermo::CoolingOI(g.o, n_hi, n_h2, n_e, T_cap);
-      cooling += Thermo::CoolingLya(g.h, n_e, T);
+      const Real c_lya = Thermo::CoolingLya(g.h, n_e, T);
+      cooling += c_lya;
+      cooling_h += c_lya;
       const Real vth = Kokkos::sqrt(2.*units::Units::k_boltzmann_cgs*T_cap/
                                     units::Units::CO_mass_cgs);
       const Real grad_eff = Kokkos::fmax(c.grad_v, vth/c.s.leff_co_max);
@@ -277,15 +338,35 @@ struct GOW17Network {
       cooling += Thermo::CoolingRec(c.s.zd, T_cap, n_e, c.g0);
       cooling += Thermo::CoolingH2diss(g.h, y[IH2], r.k2[gow17::I2_H2_H],
                                        r.k2[gow17::I2_H2_H2]);
-      cooling += Thermo::CoolingHIion(g.h, g.e, r.k2[gow17::I2_H_E]);
-      if (c.s.he_coll_ion) {  // 24.587 eV per He I ionization
+      const Real c_hi = Thermo::CoolingHIion(g.h, g.e, r.k2[gow17::I2_H_E]);
+      cooling += c_hi;
+      cooling_h += c_hi;
+      if (c.s.he_coll_ion) {  // He I ionization energy per ionization
         cooling += c.s.chi_he_erg*r.k2[gow17::I2_HE_E]*g.e*g.he;
       }
       if (c.s.dust_cooling) {
         cooling += dust::GasToDust(n_h, T, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
       }
     }
+    if (c.s.hot && T > c.s.temp_hot0) {
+      Real v[hot::NCOL];
+      CIEAt(c, T, v);
+      HotBlend<Real>(T, n_h*(v[hot::LAMBDA_HE] + c.s.zg*v[hot::LAMBDA_METAL]), c,
+                     cooling_h, &heating, &cooling);
+    }
     return HeatCool{heating, cooling};
+  }
+
+  //! Above temp_hot0 (Tigris form, smootherstep weight w): heating and the cooling
+  //! other than hydrogen's (cooling_h: Ly-alpha, H I collisional ionization) times
+  //! 1 - w, plus w times the CIE helium and metal cooling cie [erg s^-1 per H]
+  template <class S>
+  KOKKOS_INLINE_FUNCTION static void HotBlend(const S &T, const S &cie, const Cell &c,
+                                              const S &cooling_h, S *heating,
+                                              S *cooling) {
+    const S w = hot::Weight<S>(T, c.s.temp_hot0, c.s.temp_hot1);
+    *heating *= 1.0 - w;
+    *cooling = cooling_h + (1.0 - w)*(*cooling - cooling_h) + w*cie;
   }
 
   //! edot in code units, and d(edot)/de at fixed species, from one dual-number pass
@@ -369,7 +450,7 @@ struct GOW17Network {
       heating += Thermo::HeatingH2pumpFrom(g.h, y[IH2], n_h, k_h2_photo, geff);
       heating += Thermo::HeatingH2diss(k_h2_photo, y[IH2]);
     }
-    S cooling = 0.0;
+    S cooling = 0.0, cooling_h = 0.0;
     if (T >= c.s.t_min_cooling) {
       const gow17::GOW17ThermoCoefficients<S> k =
           gow17::LookupThermo<S>(tab, s_cap, dw_cap);
@@ -381,8 +462,9 @@ struct GOW17Network {
       }
       cooling += Thermo::CoolingOIFrom(g.o, n_hi, n_h2, n_e, k.oi, k.oi_boltz[0],
                                        k.oi_boltz[1], k.oi_boltz[2]);
-      cooling += Thermo::CoolingLyaFrom(g.h, n_e, col(gow17::C_LYA),
-                                        col(gow17::C_LYA + 1));
+      cooling_h = Thermo::CoolingLyaFrom(g.h, n_e, col(gow17::C_LYA),
+                                         col(gow17::C_LYA + 1));
+      cooling += cooling_h;
       const S vth = dual::sqrt((2.*units::Units::k_boltzmann_cgs/
                                 units::Units::CO_mass_cgs)*Ts_cap);
       const S grad_eff = dual::fmax(vth*(1.0/c.s.leff_co_max), c.grad_v);
@@ -401,7 +483,7 @@ struct GOW17Network {
           constexpr Real LN10 = 2.30258509299404590e0;
           constexpr Real SMALL = gow17::SMALL_REAL;
           const S div = g.h/(col(gow17::C_NCR_H) + SMALL) +
-                        y[IH2]/(col(gow17::C_NCR_H2) + SMALL);
+                        2.0*y[IH2]/(col(gow17::C_NCR_H2) + SMALL);
           const S n2ncr = (div < SMALL) ? S(n_h*SMALL) : n_h*div;
           const S inv = 1.0/(1.0 + n2ncr);
           const S e9 = (col(gow17::C_LOG10_K9H)*n2ncr + col(gow17::C_LOG10_K9L))*inv;
@@ -412,8 +494,10 @@ struct GOW17Network {
         }
       }
       cooling += Thermo::CoolingH2diss(g.h, y[IH2], k_h2_h, k_h2_h2);
-      cooling += Thermo::CoolingHIion(g.h, g.e, k_h_e);
-      if (c.s.he_coll_ion) {  // 24.587 eV per He I ionization; value from Prepare
+      const S c_hi = Thermo::CoolingHIion(g.h, g.e, k_h_e);
+      cooling += c_hi;
+      cooling_h += c_hi;
+      if (c.s.he_coll_ion) {  // He I ionization energy per ionization; value from Prepare
         S k_he_e = r.k2[gow17::I2_HE_E];
         if constexpr (DERIV) k_he_e.d = n_h*col(gow17::C_K2 + gow17::I2_HE_E).d;
         cooling += c.s.chi_he_erg*k_he_e*(g.e*g.he);
@@ -421,6 +505,11 @@ struct GOW17Network {
       if (c.s.dust_cooling) {
         cooling += dust::GasToDust(n_h, Ts, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
       }
+    }
+    if (c.s.hot && T > c.s.temp_hot0) {
+      const S cie = n_h*(col(gow17::C_CIE + hot::LAMBDA_HE) +
+                         c.s.zg*col(gow17::C_CIE + hot::LAMBDA_METAL));
+      HotBlend<S>(Ts, cie, c, cooling_h, &heating, &cooling);
     }
     return HeatCoolT<S>{heating, cooling};
   }

@@ -17,12 +17,14 @@
 //!   the terms shared with GOW17 (thermo.hpp); the NCR-only terms come in P5b.
 
 #include <array>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 
 #include "athena.hpp"
 #include "parameter_input.hpp"
+#include "chemistry2/data_path.hpp"
 #include "chemistry2/inputs/cell_inputs.hpp"
 #include "chemistry2/network/ncr_rates.hpp"
 #include "chemistry2/network/ncr_table.hpp"
@@ -70,21 +72,38 @@ struct NCRNetwork {
     bool nebular = true;         // nebular line fit; off when ion ladders cool by line
     Real temp_hot0 = ncr::TEMP_HOT0;  // hot-gas window [temp_hot0, temp_hot1] [K]
     hot::CIETable cie;           // CIE helium and metal terms (analytic path only; the
-                                 // table path reads them from ncr::C_CIE columns)
+                                 // table path reads them from gow17::C_CIE columns)
+    // H I collisional ionization: Janev et al. (1987) fit as in Gong et al. (2017) and
+    // Tigris NCR (default), or Voronov (1997) from inputs/chemistry2/ions
+    bool coll_ion_hi_voronov = false;
+    Rates::CollIonFit ci_h;
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
     Settings s = ReadValues(pin, b);
     s.temp_hot0 = pin->GetOrAddReal(b, "NCR_temp_hot0", ncr::TEMP_HOT0);
-    // the CIE table is read only when an NCR chemical network is the one selected
+    const std::string ci = pin->GetOrAddString(b, "NCR_coll_ion_HI", "janev");
+    if (ci != "janev" && ci != "voronov") {
+      throw std::runtime_error("NCR_coll_ion_HI must be janev or voronov, not " + ci);
+    }
+    s.coll_ion_hi_voronov = (ci == "voronov");
+    // the data files are read only when an NCR chemical network is the one selected
     const bool selected = pin->GetOrAddString(b, "network", "").rfind("NCR", 0) == 0;
     hot::CIESource src;
     if (selected) {
       src = hot::ReadCIESource(pin->GetOrAddString(
-          b, "cie_table", "inputs/chemistry2/cie/tigress_coolftn_ncr.txt"));
+          b, "cie_table", DataPath("inputs/chemistry2/cie/tigress_coolftn_ncr.txt")));
+      if (s.coll_ion_hi_voronov) {
+        Rates::CollIonRate rates;
+        rates.Load(pin->GetOrAddString(b, "ion_data_dir",
+                                       DataPath("inputs/chemistry2/ions/")) +
+                   "voronov97_coll_ion.dat");
+        s.ci_h = rates.Get(1, 1);
+      }
     }
     if constexpr (TABLE) {
-      s.table = ncr::BuildNCRTable(gow17::ROWS_PER_OCTAVE, selected ? &src : nullptr);
+      s.table = ncr::BuildNCRTable(gow17::ROWS_PER_OCTAVE, selected ? &src : nullptr,
+                                   s.coll_ion_hi_voronov ? &s.ci_h : nullptr);
     } else {
       if (selected) s.cie = hot::MakeCIETable(src);
     }
@@ -160,11 +179,11 @@ struct NCRNetwork {
       k.ncr_h2 = t.At(s, ncr::C_NCR_H2);
       k.ncr_hi = t.At(s, ncr::C_NCR_HI);
       k.k1619 = t.At(s, ncr::C_K1619);
-      k.xe_cie = t.At(s, ncr::C_CIE + hot::XE_HE) +
-                 c.s.zg*t.At(s, ncr::C_CIE + hot::XE_METAL);
+      k.xe_cie = t.At(s, gow17::C_CIE + hot::XE_HE) +
+                 c.s.zg*t.At(s, gow17::C_CIE + hot::XE_METAL);
     } else {
       k.alpha_b = c.s.case_a ? ncr::AlphaAHII(T) : ncr::AlphaBHII(T);
-      k.k_coll = ncr::CollIonHI(T);
+      k.k_coll = c.s.coll_ion_hi_voronov ? c.s.ci_h.Rate(T) : ncr::CollIonHI(T);
       k.alpha_cii = ncr::AlphaCII(T);
       k.k_ch2p = 3.3e-13*Kokkos::pow(T, -1.3)*Kokkos::exp(-23.0/T);
       const Real T2 = T*1e-2;
@@ -587,8 +606,8 @@ struct NCRNetwork {
     cooling += Thermo::CoolingH2diss(x_hi, x_h2, k_h2_h, k_h2_h2);
     cooling += Thermo::CoolingHIion(x_hi, x_e, k_hi);
     if (T > c.s.temp_hot0) {
-      const S cie = n_h*(col(ncr::C_CIE + hot::LAMBDA_HE) +
-                         c.s.zg*col(ncr::C_CIE + hot::LAMBDA_METAL));
+      const S cie = n_h*(col(gow17::C_CIE + hot::LAMBDA_HE) +
+                         c.s.zg*col(gow17::C_CIE + hot::LAMBDA_METAL));
       HotBlend<S>(Ts, cie, c, &heating, &other);
     }
     return HeatCoolT<S>{heating, cooling + other};

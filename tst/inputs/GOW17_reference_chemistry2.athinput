@@ -58,6 +58,8 @@ mu          = 1.27                    # mean molecular weight
 
 <chemistry2>
 network                    = GOW17      # Chemistry network to be used
+GOW17_he_coll_ion          = false      # as GOW17 (the reference has no He I ionization)
+GOW17_hot_cooling          = false      # as GOW17 (the reference has no hot-gas branch)
 ode_solver                 = kokkos_BDF # ODE solver to be used
 kokkos_BDF_rtol            = 1e-3       # BDF relative tolerance
 kokkos_BDF_atol            = 1e-6       # BDF absolute tolerance

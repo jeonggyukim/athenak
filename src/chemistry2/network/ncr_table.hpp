@@ -34,9 +34,7 @@ enum : int {
   C_HII_REC,                   // recombination energy times alpha_B [erg cm^3 s^-1]
   C_NEB,                       // nebular T-part exp(-38585.52/T) poly / sqrt(T)
   C_ALPHA_A,                   // H+ case A recombination [cm^3 s^-1]
-  C_CIE,                       // hot::NCOL CIE columns (Lambda_He, Lambda_metal,
-                               // xe_He, xe_metal); zero without a CIE table
-  N_NCR_COLS = C_CIE + hot::NCOL
+  N_NCR_COLS
 };
 
 //! Fill one row at T: GOW17's columns, then NCR's
@@ -83,11 +81,13 @@ inline void FillNCRRow(const Real T, Real *row) {
 
 //! The NCR table; with cie, its columns at each row temperature (else zero)
 inline RowTable BuildNCRTable(const int rows_per_octave = gow17::ROWS_PER_OCTAVE,
-                              const hot::CIESource *cie = nullptr) {
+                              const hot::CIESource *cie = nullptr,
+                              const Rates::CollIonFit *ci_h = nullptr) {
   const RowGrid grid = RowGrid::Make(1.0, 1073741824.0, 30*rows_per_octave + 1);
   return BuildRowTable(grid, N_NCR_COLS, [&](Real T, Real *row) {
     FillNCRRow(T, row);
-    for (int k = 0; k < hot::NCOL; ++k) row[C_CIE + k] = cie ? cie->Eval(k, T) : 0.0;
+    gow17::FillCIE(T, cie, row);
+    if (ci_h != nullptr) row[C_K_COLL_HI] = ci_h->Rate(T);  // Voronov instead of Janev
   });
 }
 

@@ -36,10 +36,18 @@ int main(int argc, char *argv[]) {
   Net::Settings st{{1.0e-10, 1.0, 0.1, 3.0e-17, true, true, 3.5e4, 5.7e-11, 3.086e20,
                     true, false, 10.0, 0.0}, chemistry2::RowTable(),
                    chemistry2::ions::IonCoolingTable()};
-  st.base.table = chemistry2::ncr::BuildNCRTable();
   st.base.nebular = false;  // as NCROxygen::ReadSettings
-  st.base.case_a = (argc > 1 && std::string(argv[1]) == "case_a");  // as Cloudy CIE
+  // arguments (for the Cloudy comparison): case_a, voronov (H I collisional ionization)
+  bool voronov = false;
+  for (int a = 1; a < argc; ++a) {
+    if (std::string(argv[a]) == "case_a") st.base.case_a = true;
+    if (std::string(argv[a]) == "voronov") voronov = true;
+  }
   const chemistry2::ions::IonRateData data(dir);
+  st.base.coll_ion_hi_voronov = voronov;
+  st.base.ci_h = data.ci.Get(1, 1);
+  st.base.table = chemistry2::ncr::BuildNCRTable(
+      chemistry2::gow17::ROWS_PER_OCTAVE, nullptr, voronov ? &st.base.ci_h : nullptr);
   st.ions = chemistry2::ions::BuildIonTable(data, st.base.table.grid, 8, 2);
   st.cool = chemistry2::ions::BuildIonCoolingTable(st.base.table.grid,
                                                    dir + "ion_cooling/", {"o_2", "o_3"});
