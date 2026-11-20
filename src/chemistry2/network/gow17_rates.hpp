@@ -78,17 +78,6 @@ struct GOW17TemperatureRates {
                                                const bool kgr_h2_const);
 };
 
-//! He I + e -> He+ + 2e [cm^3 s^-1], Voronov (1997): dE = 24.6 eV, P = 0, A = 1.75e-8,
-//! X = 0.180, K = 0.35; zero for U > 80 (Tigris CollIonHeI)
-KOKKOS_INLINE_FUNCTION Real CollIonHeI(const Real T) {
-  const Real u = 24.6*11604.518/T;  // 24.6 eV/(k_B T)
-  if (u > 80.0) return 0.0;
-  return 1.75e-8/(0.180 + u)*Kokkos::pow(u, 0.35)*Kokkos::exp(-u);
-}
-
-//! He I ionization energy [erg], 24.587 eV
-constexpr Real CHI_HEI_ERG = 24.587*1.602176634e-12;
-
 KOKKOS_INLINE_FUNCTION Real CIIRecombination(const Real T) {
   constexpr Real A = 2.995e-9;
   constexpr Real B = 0.7849;
@@ -186,7 +175,7 @@ KOKKOS_INLINE_FUNCTION GOW17TemperatureRates::GOW17TemperatureRates(
   k2[I2_HP_O] *= (1.1e-11*Kokkos::exp(0.517*ln_T) + 4.0e-10*Kokkos::exp(6.69e-3*ln_T))*
                  Kokkos::exp(-227./T);
   k2[I2_OP_H] *= 4.99e-11*Kokkos::exp(0.405*ln_T) + 7.5e-10*Kokkos::exp(-0.458*ln_T);
-  k2[I2_HE_E] = CollIonHeI(T);
+  k2[I2_HE_E] = 0.0;  // from the Voronov data: table column, or Prepare (analytic)
 
   // Collisional dissociation of H2 and ionization of H (Glover & Mac Low 2007)
   constexpr Real TEMP_COLL = 7.0e2;

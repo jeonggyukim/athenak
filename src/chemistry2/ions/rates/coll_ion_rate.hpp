@@ -33,6 +33,7 @@
 // Athena++ headers
 #include "athena.hpp"
 #include "chemistry2/ions/rates/rate_table.hpp"
+#include "units/units.hpp"
 
 namespace Rates {
 
@@ -42,7 +43,20 @@ namespace Rates {
 constexpr Real kCollIonUMax = 80.0;
 
 //! Ionization energy in electron volts, as a temperature: eV/k_B in kelvin.
-constexpr Real kEvOverBoltzmann = 11604.518121550082;
+constexpr Real kEvOverBoltzmann =
+    units::Units::electron_volt_cgs/units::Units::k_boltzmann_cgs;
+
+//! One Voronov (1997) fit; plain data, so it can be copied to the device
+struct CollIonFit {
+  Real de_ev = 0.0, p = 0.0, a = 0.0, x = 0.0, k = 0.0;
+
+  //! Rate coefficient [cm^3 s^-1] at temperature T [K]
+  KOKKOS_INLINE_FUNCTION Real Rate(const Real temp) const {
+    const Real u = de_ev*kEvOverBoltzmann/temp;
+    if (u > kCollIonUMax) return 0.0;
+    return a*(1.0 + p*Kokkos::sqrt(u))/(x + u)*Kokkos::pow(u, k)*Kokkos::exp(-u);
+  }
+};
 
 //----------------------------------------------------------------------------------------
 //! \class CollIonRate
@@ -88,18 +102,13 @@ class CollIonRate {
   Real Threshold(int z, int n) const { return Find(z, n).de_ev; }
 
   //! \brief Rate coefficient [cm^3 s^-1] at temperature T [K].
-  Real Rate(int z, int n, Real temp) const {
-    const Fit &f = Find(z, n);
-    const Real u = f.de_ev*kEvOverBoltzmann/temp;
-    if (u > kCollIonUMax) return 0.0;
-    return f.a*(1.0 + f.p*std::sqrt(u))/(f.x + u)*std::pow(u, f.k)
-        *std::exp(-u);
-  }
+  Real Rate(int z, int n, Real temp) const { return Find(z, n).Rate(temp); }
+
+  //! \brief The fit itself, for evaluation on the device.
+  CollIonFit Get(int z, int n) const { return Find(z, n); }
 
  private:
-  struct Fit {
-    Real de_ev = 0.0, p = 0.0, a = 0.0, x = 0.0, k = 0.0;
-  };
+  using Fit = CollIonFit;
 
   static int Key(int z, int n) { return z*128 + n; }
 

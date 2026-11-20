@@ -11,6 +11,7 @@
 //!        cooling terms, interpolated linearly.
 
 #include "athena.hpp"
+#include "chemistry2/ions/rates/coll_ion_rate.hpp"
 #include "chemistry2/network/gow17_rates.hpp"
 #include "chemistry2/rates/row_table.hpp"
 #include "chemistry2/thermo/thermo.hpp"
@@ -99,12 +100,15 @@ inline void FillRow(const Real T, const bool kgr_h2_const, Real *row) {
   for (int c = 0; c < N_COLS; ++c) row[c] = v[c];
 }
 
-//! The GOW17 table, rows_per_octave rows per factor of 2 in T from 1 K to 2^30 K
+//! The GOW17 table, rows_per_octave rows per factor of 2 in T from 1 K to 2^30 K; the
+//! He I collisional ionization column from ci_he (Voronov 1997), zero without it
 inline RowTable BuildGOW17Table(const bool kgr_h2_const,
-                                const int rows_per_octave = ROWS_PER_OCTAVE) {
+                                const int rows_per_octave = ROWS_PER_OCTAVE,
+                                const Rates::CollIonFit *ci_he = nullptr) {
   const RowGrid grid = RowGrid::Make(1.0, 1073741824.0, 30*rows_per_octave + 1);
   return BuildRowTable(grid, N_COLS, [&](Real T, Real *row) {
     FillRow(T, kgr_h2_const, row);
+    row[C_K2 + I2_HE_E] = ci_he ? ci_he->Rate(T) : 0.0;
   });
 }
 

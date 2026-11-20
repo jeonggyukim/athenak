@@ -22,6 +22,8 @@
 #include "athena.hpp"
 #include "parameter_input.hpp"
 #include "chemistry2/inputs/cell_inputs.hpp"
+#include "chemistry2/ions/rates/coll_ion_rate.hpp"
+#include "chemistry2/ions/rates/ion_threshold.hpp"
 #include "chemistry2/network/gow17_rates.hpp"
 #include "chemistry2/network/gow17_table.hpp"
 #include "chemistry2/network/network_config.hpp"
@@ -82,12 +84,28 @@ struct GOW17Network {
     Real alpha_gd = 0.0;
     // He I + e -> He+ + 2e (Tigris, not in GOW17); off for parity with src/chemistry
     bool he_coll_ion = true;
+    Rates::CollIonFit ci_he;   // He I + e (Voronov 1997, inputs/chemistry2/ions)
+    Real chi_he_erg = 0.0;     // He I ionization energy (Verner et al. 1996) [erg]
   };
 
   static Settings ReadSettings(ParameterInput *pin, const std::string &b) {
     Settings s = ReadValues(pin, b);
     s.he_coll_ion = pin->GetOrAddBoolean(b, "GOW17_he_coll_ion", true);
-    if constexpr (TABLE) s.table = gow17::BuildGOW17Table(s.kgr_h2_const);
+    // the atomic data are read only when a GOW17 chemical network is the one selected
+    if (s.he_coll_ion &&
+        pin->GetOrAddString(b, "network", "").rfind("GOW17", 0) == 0) {
+      const std::string dir = pin->GetOrAddString(b, "ion_data_dir",
+                                                  "inputs/chemistry2/ions/");
+      Rates::CollIonRate ci;
+      ci.Load(dir + "voronov97_coll_ion.dat");
+      ions::IonThreshold th;
+      th.Load(dir + "verner96_photx.dat");
+      s.ci_he = ci.Get(2, 2);
+      s.chi_he_erg = th.Erg(2, 2);
+    }
+    if constexpr (TABLE) {
+      s.table = gow17::BuildGOW17Table(s.kgr_h2_const, gow17::ROWS_PER_OCTAVE, &s.ci_he);
+    }
     return s;
   }
 
@@ -196,6 +214,7 @@ struct GOW17Network {
       const gow17::GOW17TemperatureRates tr(T, T_coll, c.s.kgr_h2_const);
       sub.r = gow17::MakeGOW17Rates(tr, y[IH2], sub.g.h, sub.g.e, c.n_h, c.s.zd,
                                     c.xi_cr, c.g0);
+      sub.r.k2[gow17::I2_HE_E] = c.s.ci_he.Rate(T)*c.n_h;
     }
     return sub;
   }
@@ -260,7 +279,7 @@ struct GOW17Network {
                                        r.k2[gow17::I2_H2_H2]);
       cooling += Thermo::CoolingHIion(g.h, g.e, r.k2[gow17::I2_H_E]);
       if (c.s.he_coll_ion) {  // 24.587 eV per He I ionization
-        cooling += gow17::CHI_HEI_ERG*r.k2[gow17::I2_HE_E]*g.e*g.he;
+        cooling += c.s.chi_he_erg*r.k2[gow17::I2_HE_E]*g.e*g.he;
       }
       if (c.s.dust_cooling) {
         cooling += dust::GasToDust(n_h, T, c.s.temp_dust, c.s.zd, c.s.alpha_gd);
@@ -397,7 +416,7 @@ struct GOW17Network {
       if (c.s.he_coll_ion) {  // 24.587 eV per He I ionization; value from Prepare
         S k_he_e = r.k2[gow17::I2_HE_E];
         if constexpr (DERIV) k_he_e.d = n_h*col(gow17::C_K2 + gow17::I2_HE_E).d;
-        cooling += gow17::CHI_HEI_ERG*k_he_e*(g.e*g.he);
+        cooling += c.s.chi_he_erg*k_he_e*(g.e*g.he);
       }
       if (c.s.dust_cooling) {
         cooling += dust::GasToDust(n_h, Ts, c.s.temp_dust, c.s.zd, c.s.alpha_gd);

@@ -17,6 +17,7 @@
 #include "chemistry2/ions/ion_ladder.hpp"
 #include "chemistry2/ions/rates/coll_ion_rate.hpp"
 #include "chemistry2/ions/rates/ct_rate.hpp"
+#include "chemistry2/ions/rates/ion_threshold.hpp"
 #include "chemistry2/ions/rates/recomb_rate.hpp"
 #include "chemistry2/rates/row_table.hpp"
 
@@ -31,6 +32,7 @@ struct IonRateData {
   Rates::RecombRate rec;
   Rates::CollIonRate ci;
   Rates::ChargeTransferRate ct;
+  IonThreshold th;  // ionization energies (Verner et al. 1996)
 
   explicit IonRateData(const std::string &dir) {
     rec.Load(dir + "badnell_rr_2023.dat", dir + "badnell_dr_C_2023.dat",
@@ -38,6 +40,7 @@ struct IonRateData {
     ci.Load(dir + "voronov97_coll_ion.dat");
     ct.LoadRecomb(dir + "kingdon_ferland96_ct_rec.dat");
     ct.LoadIon(dir + "kingdon_ferland96_ct_ion.dat");
+    th.Load(dir + "verner96_photx.dat");
   }
 };
 
